@@ -1,0 +1,19 @@
+spring:
+  config:
+    import: "optional:file:.env[.properties]"
+  application:
+    name: HoyoAgent
+
+langchain4j:
+  open-ai:
+    chat-model:
+      base-url: ${DS_BASE_URL}
+      api-key: ${DS_API_KEY}
+      model-name: ${DS_MODEL_NAME} # 模型名称
+      log-requests: true
+      log-responses: true
+      timeout: PT60S
+
+logging:
+  level:
+    dev.langchain4j: DEBUG
