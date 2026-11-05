@@ -48,7 +48,8 @@ public class FakePlayerTool {
             "小明", new Abyss(10, 24, "2026-11 上半期")
     );
 
-    @Tool("查询原神角色信息")
+    @Tool("列出某个玩家账号下的全部原神角色，用于回答「我有哪些角色」「谁满级了」。只需要玩家昵称，不需要角色名")
+//    @Tool("查询原神角色信息")
     public String getPlayerCharacters(
             @P("米游社账号昵称，例如：萝卜") String nickname) {
         log.info("[TOOL] getPlayerCharacters nickname={}", nickname);
@@ -66,7 +67,8 @@ public class FakePlayerTool {
         return "%s 的角色（共 %d 个）：\n%s".formatted(nickname, player.characters().size(), lines);
     }
 
-    @Tool("查询原神角色详情")
+//    @Tool("查询原神角色详情")
+    @Tool("查询单个角色的属性（等级、命座）。前提是已经知道具体角色名；只知道玩家时请改用 getPlayerCharacters")
     public String getCharacterDetail(@P("角色名称") String characterName) {
         log.info("[TOOL] getCharacterDetail characterName={}", characterName);
         recorder.record("getCharacterDetail", characterName);
