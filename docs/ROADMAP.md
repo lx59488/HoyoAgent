@@ -4,7 +4,7 @@
 > 用法：从上往下做，每完成一条把 `[ ]` 改成 `[x]`。每个阶段结束后打一个 git tag（`phase-1`、`phase-2`…）。
 > 设计原则：**先用假数据学 Agent，再接真实 API**。两条线并行、互不阻塞。
 
-**最后更新：2026-11-02**（P2 完成，P3 进行中）
+**最后更新：2026-11-05**（P1/P2 完成；P3 未跑批；P4 骨架完成，已打通第一个只读接口）
 
 ---
 
@@ -15,8 +15,8 @@
 | P0 | 环境收尾 | 能启动的空工程 | 30 min | 🚧 2 项待办 |
 | P1 | AI 闭环 | `GET /chat` 能对话 | 半天 | ✅ 完成 |
 | P2 | 第一个 Tool（假数据） | 模型自主调用工具 | 1 天 | ✅ 完成 |
-| P3 | 多工具与工具设计 | 10 条用例命中 ≥ 8 | 1 天 | 🚧 进行中 |
-| P4 | 米游社客户端基线 | 控制台打印真实 uid | 2~3 天 | 未开始 |
+| P3 | 多工具与工具设计 | 10 条用例命中 ≥ 8 | 1 天 | 🚧 代码就绪，未跑批 |
+| P4 | 米游社客户端基线 | 控制台打印真实 uid | 2~3 天 | 🚧 骨架完成，验证中 |
 | P5 | 数据契约与错误治理 | 脱敏 + 限流 + DTO | 1~2 天 | 未开始 |
 | P6 | 接入真实数据 | 自然语言查真实战绩 | 半天 | 未开始 |
 | P7 | 记忆与多轮 | 多轮对话不丢上下文 | 1 天 | 未开始 |
@@ -28,24 +28,37 @@
 
 ```
 com.luobo.hoyoagent
-├── HoyoAgentApplication.java
+├── HoyoAgentApplication.java          ← @ConfigurationPropertiesScan 已开启
+├── common/                            ← 横切：统一响应 / 异常 / 日志脱敏
+│   ├── constant/CommonConstants.java
+│   ├── exception/{BusinessException, ErrorCode, GlobalExceptionHandler}.java
+│   ├── log/ErrorLogSanitizer.java
+│   └── result/Result.java
 ├── adapter/
 │   └── http/
-│       ├── ChatController.java          ← P1：纯模型问答（对照组）
-│       └── AgentController.java         ← P2：走 AiService，回传 toolsCalled
+│       ├── ChatController.java        ← P1：纯模型问答（对照组）
+│       └── AgentController.java       ← P2：走 AiService，回传 toolsCalled
 ├── agent/
-│   ├── MihoyoAssistant.java             ← @AiService 接口（无实现，运行时动态代理）
-│   ├── observability/
-│   │   └── ToolCallRecorder.java        ← ThreadLocal 记录工具调用
-│   └── tool/
-│       └── FakePlayerTool.java          ← 4 个假工具
-scripts/
-└── smoke-agent.ps1                      ← 冒烟脚本（当前 5 条用例）
-docs/
-└── ROADMAP.md                           ← 本文件
+│   ├── MihoyoAssistant.java           ← @AiService 接口（无实现，运行时动态代理）
+│   ├── observability/ToolCallRecorder.java
+│   └── tool/FakePlayerTool.java       ← 4 个假工具（P6 会换成真数据）
+└── mihoyo/                            ← P4：外部系统客户端（与 agent 完全解耦）
+    ├── api/MiyousheApi.java           ← 业务接口：路径 + 参数 → JsonNode
+    ├── client/MihoyoHttpClient.java   ← OkHttp 单例 + 统一 header + retcode 检查
+    ├── auth/{Credential, CookieParser, CredentialProvider}.java
+    ├── sign/Signer.java               ← DS1；salt 空则不发 DS
+    └── config/HoyoProperties.java     ← @ConfigurationProperties(prefix = "hoyo")
+
+src/test/java/...
+└── mihoyo/MiyousheApiTest.java        ← @Tag("network")，真实打米游社
+
+scripts/smoke-agent.ps1                ← P3 冒烟脚本（当前 5 条用例）
+docs/ROADMAP.md                        ← 本文件
 ```
 
 接口：`GET /chat?q=`（纯问答）、`GET /agent?q=`（带工具，返回 `{ok, reply, toolsCalled}`）
+
+**结构决策**：原计划放 `adapter.mihoyo`，实际改为顶层 `mihoyo/`。原因是后续会有多个入站适配器（http / onebot / console），把「外部系统客户端」提到顶层更好表达边界。约定：**`adapter` 只表示入站，`mihoyo` 表示出站**。
 
 ---
 
@@ -56,8 +69,9 @@ docs/
 - [x] `spring-boot-starter-test` 补上 `<scope>test</scope>`
 - [x] `.env` 通过 `spring.config.import: "optional:file:.env[.properties]"` 生效
 - [x] `.env` 里的 `DS_MODEL_NAME` 改成 `deepseek-flash`
-- [x] `git init` + 首次提交（已完成，2 个 commit）
-- [ ] **轮换 DeepSeek API Key** —— 2026-11-02 核对：`.env` 里仍是旧 key，未更换
+- [x] `git init` + 提交，远程 `github.com/lx59488/HoyoAgent`
+- [x] Maven 本地仓库统一：`%USERPROFILE%\.m2\settings.xml` 指向 `D:/software/maven/apache-maven-3.9.6/repository`，命令行与 IDEA 一致
+- [ ] **轮换 DeepSeek API Key** —— 2026-11-02 核对：`.env` 里仍是旧 key
 - [ ] **新建 `.env.example`** —— 2026-11-02 核对：文件不存在
 - [x] logback `1.5.38` 的 CVE-2026-19880 已评估：路径穿越，需要自定义 MDC 拼接 FileAppender 才能触发；本项目无可利用路径，**暂不处理**，等 Boot 4.2 GA 升级时顺带解决
 
@@ -71,7 +85,7 @@ docs/
 
 ## P1 · AI 闭环 ✅
 
-- [x] P1-1 `adapter/http/ChatController`（原计划的 `web` 包已改为 `adapter/http`，更贴近分层）
+- [x] P1-1 `adapter/http/ChatController`
 - [x] P1-2 注入 `ChatModel`（starter 自动配置，注入接口类型）
 - [x] P1-3 暴露 `GET /chat?q=...`
 - [x] P1-4 捕获异常，返回 `{ok, reply, error}` 的 record
@@ -86,9 +100,7 @@ Invoke-RestMethod "http://localhost:8080/chat?q=用一句话介绍你自己"
 - [x] 返回中文回答
 - [ ] 断网后重试，确认异常信息可读（可稍后补）
 
-**遗留的小改进（不阻塞）**
-
-- `ChatController` 目前用 `@Resource` 字段注入，建议改成构造注入（和 `AgentController` 保持一致，也便于单测替换）
+**遗留小改进（不阻塞）**：`ChatController` 用 `@Resource` 字段注入，建议改构造注入。
 
 ---
 
@@ -101,16 +113,10 @@ Invoke-RestMethod "http://localhost:8080/chat?q=用一句话介绍你自己"
 - [x] P2-5 调用接口，日志与回复都确认工具被触发
 - [x] P2-6 看过模型实际传给工具的参数字符串
 
-**P2 的两个关键结论（比代码重要）**
+**两个关键结论（比代码重要）**
 
 1. **不需要指定工具。** `@AiService` 的 `wiringMode` 默认 `AUTOMATIC`：容器里所有带 `@Tool` 方法的 bean 会被**自动**接到**每个** AI 服务上。只有切到 `EXPLICIT` 时才用 `tools = "beanName"`（注意：是 bean 名，类型是 `String[]`，不是 `Class`）。
 2. **接口没有实现类，但有实例。** `AiServices.builder(接口).chatModel(...).tools(...).build()` 返回一个 JDK 动态代理。所谓"模型自主调用工具"实际是框架的循环：发请求（带 tools）→ 收到 `tool_calls` → 反射执行 → 回填 `ToolExecutionResultMessage` → 再发一次 → 直到没有 `tool_calls`。
-
-**验收**
-
-- [x] 问「萝卜有哪些原神角色」，回复里出现假数据中的角色
-- [x] 问「今天天气怎么样」，不调用工具
-- [x] 工具内部把"查不到"作为文字返回，而不是抛异常
 
 ---
 
@@ -118,6 +124,7 @@ Invoke-RestMethod "http://localhost:8080/chat?q=用一句话介绍你自己"
 
 **目标**：用实验证明「命中率由描述决定」，练出改描述的手感。
 **纪律**：只改**描述和参数**，不改代码逻辑，否则无法归因。
+**现状**：代码与脚本已就绪（4 个工具 + 观测），**但两轮跑批一次都没做**，10 条用例表还是空的。这是当前最大的"欠账"。
 
 ### 已完成
 
@@ -177,46 +184,59 @@ Invoke-RestMethod "http://localhost:8080/chat?q=用一句话介绍你自己"
 
 ---
 
-## P4 · 米游社客户端基线（与 Agent 完全解耦）
+## P4 · 米游社客户端基线 🚧
 
 **目标**：纯 Java 打通**一个**只读接口。这一步不许碰 AI，也不许改 Agent 代码。
-**前置**：准备一个**小号**。不要用主账号做实验。
+**前置**：用**小号**。不要用主账号做实验。
+**现状**：骨架 6 个类已落地，`getAppConfig` 已打通并验证；但 salt 未知、device_id 未实现、错误场景未验证。
 
-- [ ] P4-1 建包 `com.luobo.hoyoagent.adapter.mihoyo`（与现有 `adapter/http` 对齐）
-- [ ] P4-2 `Credential`：承载 cookie 各字段（字段清单见附录 A，边探边填）
-- [ ] P4-3 `CookieParser`：从 cookie 字符串解析成 `Credential`
-- [ ] P4-4 `Signer`：生成 `DS` 头。**salt 必须从配置读，不许写死在代码里**
-- [ ] P4-5 `DeviceIdProvider`：生成一次、持久化到本地文件、每次复用
-- [ ] P4-6 `MihoyoHttpClient`：OkHttp 单例 + 统一 header + 统一超时
-- [ ] P4-7 日志脱敏拦截器：`cookie` / `DS` / `x-rpc-*` 一律打码后才允许输出
-- [ ] P4-8 打通第一个只读接口（能拿到 uid + 昵称就够）
-- [ ] P4-9 `retcode` 映射表：限流类 / 登录失效类 / 需验证类 / 致命类
+### 已完成
+
+- [x] P4-1 包结构落地：`mihoyo.{api, auth, client, config, sign}`（顶层 `mihoyo`，不是 `adapter.mihoyo`）
+- [x] P4-2 `Credential`（record；`toString()` 已脱敏，避免 token 进日志）
+- [x] P4-3 `CookieParser`（`ltuid_v2` > `ltuid` > `account_id_v2` > `account_id`；空值跳过；引号剥离）
+- [x] P4-4 `Signer`：DS1 结构（`md5("salt={salt}&t={t}&r={r}")`，输出 `t,r,hash`）；salt 从 `hoyo.salt` 读，**空则不发 DS 头**
+- [x] P4-6 `MihoyoHttpClient`：OkHttp 单例、统一 header、HTTP 状态检查、retcode 检查、异常映射到 9xxx
+- [x] P4-8 第一个只读接口：`GET /apihub/wapi/getAppConfig?gids=2` → `retcode=0`，拿到完整 `config`（60+ key）
+
+**实测结论（重要）**：`getAppConfig` **不校验 DS**。三种情况均返回 `retcode=0`——带原始 DS、带伪造 DS、完全不带 DS。所以「先打通、后签名」的策略成立。
+
+### 待做
+
+- [ ] **P4-5 `DeviceIdProvider`**：当前客户端完全没发 `x-rpc-device_id`。只读配置接口不需要，但需要 cookie 的接口大概率会因此失败
+- [ ] P4-7 日志脱敏：目前只靠 `Credential.toString()` + 不打印 header，还没有拦截器兜底
+- [ ] P4-9 retcode 映射表补全：现有 5 条（-100/10001/-5003/10101/1034）**全是假设**，必须实测
 - [ ] P4-10 三种错误场景各验证一次：错 cookie、过期 cookie、断网
 - [ ] P4-11 离线单测：`Signer` 固定输入 → 固定输出；`CookieParser` 各种脏输入
+- [ ] P4-12 关掉 `log-requests` / `log-responses`，`dev.langchain4j: DEBUG` 降级——**还没做**，接 cookie 之前必须做
 
-**前置动作**：把 `log-requests` / `log-responses` 关掉，`dev.langchain4j: DEBUG` 降级——现在日志会把完整请求打出来，接了 cookie 之后这就是账号凭据。
+### 已修复
 
-**验收**
+- 2026-11-05：`MihoyoHttpClient` 的 retcode 判断写成了 `if (retcode == -1)`，导致除 `-1` 外的所有错误码（`-100`、`-5003`、`1034`…）都被当成成功、直接返回 `data`。已改为 `if (retcode != 0)`。**不修这一行，P4-9 的映射表永远跑不到。**
 
-- [ ] 命令行/临时入口打印出自己的 uid 和昵称
-- [ ] 三种错误场景给出**不同**的异常信息，不是统一的 500
+### 验收
+
+- [x] 命令行打印出 `retcode=0` 和真实的配置数据
+- [ ] 拿到自己的 **uid + 昵称**（需要换一个带 cookie 的接口，这才是 P4 的真正终点）
+- [ ] 三种错误场景给出**不同**的异常信息
 - [ ] 日志里搜不到任何真实 cookie 值
 
-**常见坑**
+### 常见坑
 
 - salt 与 `x-rpc-app_version` 绑定，官方会随版本换 → 做成「版本 → salt」的配置表
 - `device_id` 每次随机 = 主动往风控上撞
 - 一上来就调"签到"这类写接口 → 先只读，写操作放最后
+- **抓包文件里含完整 cookie**（`ltoken_v2` / `cookie_token_v2`），别放共享目录、别提交、别贴聊天。2026-11-02 就发生过一次（MuMu 共享文件夹里的 `request.json`）
 
 ---
 
 ## P5 · 数据契约与错误治理
 
 - [ ] P5-1 DTO：每个接口一个精简对象，只保留会用到的字段
-- [ ] P5-2 `MihoyoApiException`：携带 retcode、可读消息、分类（可重试 / 需重新登录 / 需人工 / 致命）
-- [ ] P5-3 令牌桶限流（单账号 1 req/s 起步）
-- [ ] P5-4 静态数据缓存（角色、武器、怪物这类不变的数据，放本地 JSON）
-- [ ] P5-5 `hoyo.*` 的 `@ConfigurationProperties`：app_version、salt 表、device、超时、限流参数
+- [ ] P5-2 `MiyousheException`：携带 retcode、可读消息、分类（可重试 / 需重新登录 / 需人工 / 致命）
+- [ ] P5-3 令牌桶限流（单账号 1 req/s 起步）——注意放在 **mihoyo/client**，限的是"对米游社的请求"
+- [ ] P5-4 静态数据缓存（角色、武器、怪物这类不变的数据，放本地 JSON；先内存，Redis 留到 P8）
+- [ ] P5-5 `hoyo.*` 配置补全：salt 表、device、限流参数
 - [ ] P5-6 加一个测试断言：日志里不出现 cookie 关键字
 
 **验收**
@@ -235,6 +255,7 @@ Invoke-RestMethod "http://localhost:8080/chat?q=用一句话介绍你自己"
 - [ ] P6-2 确认 `MihoyoAssistant` 与工具签名零改动
 - [ ] P6-3 端到端：自然语言 → 真实数据 → 可读回答
 - [ ] P6-4 复盘：如果工具签名被迫改了，记录当初抽象错在哪
+- [ ] P6-5 （可选）在 `agent` 里加 `PlayerQueryPort` 接口，让 `mihoyo` 反向实现，依赖方向变成"外层依赖内层"
 
 **验收**
 
@@ -280,41 +301,81 @@ Invoke-RestMethod "http://localhost:8080/chat?q=用一句话介绍你自己"
 
 ---
 
-## 附录 A · 米游社事实探测记录（P4 开始填）
+## 附录 A · 米游社事实探测记录
 
 > 这份表比代码值钱。三天不记，就想不起来当时为什么加那个 header。
 
-| 项目 | 值 | 来源/时间 | 备注 |
-|---|---|---|---|
-| 接口 host（BBS / 游戏数据 / 登录） | | | |
-| cookie 必填字段 | | | 哪些必须、哪些可省 |
-| `ltuid` / `stuid` 区别 | | | |
-| `ltoken` / `stoken` 用途与有效期 | | | |
-| `cookie_token` 获取方式 | | | |
-| `DS` 算法（拼接顺序、哈希方式） | | | |
-| salt 表（按 `x-rpc-app_version`） | | | 至少记一条能用的 |
-| 必填 header 清单 | | | UA / Referer / x-rpc-* |
-| `device_id` 生成规则 | | | 自己定的规则也要记 |
-| retcode 分类表 | | | 限流 / 失效 / 验证 / 致命 |
-| 每日签到刷新时间 | | | 以实测为准 |
-| 触发风控的阈值 | | | 例如连续多少请求后被拒 |
+### 已确认（2026-11-02 ~ 11-05 实测）
+
+| 项目 | 值 | 来源 |
+|---|---|---|
+| BBS 接口 host | `bbs-api.miyoushe.com` | 网页抓包（client_type=4） |
+| 签到接口 | `POST https://api-takumi.mihoyo.com/event/luna/hk4e/sign` | App 抓包（client_type=5） |
+| 签到必备头 | `DS`、`x-rpc-signgame: hk4e`、`x-rpc-app_version`、`x-rpc-client_type`、`x-rpc-device_id`、`x-rpc-device_fp`、`Origin`/`Referer: https://act.mihoyo.com/` | 同上 |
+| 签到 body | `{act_id, region, uid}`，**act_id 每期变**，从签到页活动信息接口取 | 同上 |
+| `getAppConfig` 是否需要认证 | **不需要** cookie，也不需要 DS（伪造/缺失 DS 均返回 retcode 0） | 三种情况实测 |
+| DS 输出格式 | `{t},{r},{md5}` | 抓包 + 文档 |
+| DS1 | `md5("salt={salt}&t={t}&r={r}")`，`r` = 6 位 `[A-Za-z0-9]` | 文档 + 抓包 |
+| DS2 | `md5("salt={salt}&t={t}&r={r}&b={body}&q={query}")`，`r` = 100000~200000 整数 | 文档 |
+| client_type → salt | 2→K2，4→LK2，5→4X/6X，1→同安卓 | [UIGF 文档](https://github.com/UIGF-org/mihoyo-api-collect/blob/main/other/authentication.md) |
+| salt 表 | 133 个历史值（截止 2.71.1） | [issue #1](https://github.com/UIGF-org/mihoyo-api-collect/issues/1) |
+| 观测到的 app_version | 网页 `2.102.0`；App `2.117.0` | 两次抓包 |
+
+### 待填
+
+| 项目 | 值 | 备注 |
+|---|---|---|
+| cookie 必填字段 | | 哪些必须、哪些可省 |
+| `ltuid` / `stuid` 区别 | | |
+| `ltoken` / `stoken` 用途与有效期 | | |
+| `cookie_token` 获取方式 | | |
+| **2.117.0 的 salt** | ❓ 未找到 | 133 个公开值 + 7967 个从网页 bundle 挖出的候选，全部不匹配 |
+| `device_id` 生成规则 | | 自己定的规则也要记 |
+| retcode 分类表 | | 限流 / 失效 / 验证 / 致命 |
+| 每日签到刷新时间 | | 以实测为准 |
+| 触发风控的阈值 | | 例如连续多少请求后被拒 |
+
+### salt 验证向量（挖到 salt 后立刻用它验证）
+
+```
+t  = 1793617524
+r  = dl5kh6
+DS = 61b1067674a2591adee64a0e600ebf8e
+
+断言：md5("salt={salt}&t=1793617524&r=dl5kh6") == 61b1067674a2591adee64a0e600ebf8e
+```
+
+另一条（网页端，client_type=4 / 2.102.0）：
+
+```
+t = 1793615718, r = x4jM6S, DS = 4ba0172d3a9d270bf488b98272ccfee9
+```
 
 ---
 
 ## 附录 B · 命令速查
 
 ```powershell
-# 启动（IDEA 里直接跑主类也可以）
+# 启动
 .\mvnw.cmd -B -ntp spring-boot:run
 
-# 跑测试
-.\mvnw.cmd -B -ntp test
+# 跑测试（跳过会打外网的用例）
+.\mvnw.cmd -B -ntp test "-Dgroups=!network"
 
-# 冒烟：跑 10 条用例（用 pwsh 7，别用 powershell.exe，见附录 C 第 7 条）
+# 只跑网络测试
+.\mvnw.cmd -B -ntp test "-Dgroups=network"
+
+# 强制刷新依赖（解决"本地有却解析不到"）
+.\mvnw.cmd -B -ntp -U clean test
+
+# 冒烟：Agent 工具用例（用 pwsh 7）
 pwsh -NoProfile -File .\scripts\smoke-agent.ps1
 
 # 看依赖版本是否收敛
 .\mvnw.cmd -B -ntp dependency:tree -Dincludes=dev.langchain4j
+
+# 确认 Maven 用的是哪个本地仓库（注意 -D 参数要加引号）
+.\mvnw.cmd -q help:evaluate "-Dexpression=settings.localRepository" -DforceStdout
 
 # 打包
 .\mvnw.cmd -B -ntp -DskipTests package
@@ -334,13 +395,15 @@ java -jar target\HoyoAgent-0.0.1-SNAPSHOT.jar "--spring.config.import=optional:f
 | 项 | 值 |
 |---|---|
 | JDK | 25.0.4.1 |
-| Maven Wrapper | 3.10.0 |
+| Maven Wrapper | 3.10.0（`~/.m2/wrapper/dists`） |
+| 系统 Maven | 3.9.6（`D:\software\maven\apache-maven-3.9.6`） |
+| 本地仓库 | `D:/software/maven/apache-maven-3.9.6/repository`（由 `~/.m2/settings.xml` 指定，命令行与 IDEA 共用） |
 | Spring Boot | 4.1.2 |
 | langchain4j | 1.20.0（boot4 starter 1.20.0-beta30） |
 | OkHttp | 4.12.0（仅供米游社客户端，LLM 走 Spring RestClient） |
+| JSON | Jackson 3（`tools.jackson.databind`）；langchain4j 内部是 Jackson 2 |
 | 日志 | logback 1.5.38（CVE-2026-19880，已评估无影响） |
-| 配置注入 | `spring.config.import: "optional:file:.env[.properties]"` |
-| Web starter | `spring-boot-starter-webmvc`（Boot 4 只支持 Jackson 3） |
+| Web starter | `spring-boot-starter-webmvc` |
 | Shell | PowerShell 7.6.9（`pwsh`）；`ExecutionPolicy: RemoteSigned` |
 
 **已知踩过的坑（避免重复）**
@@ -349,7 +412,11 @@ java -jar target\HoyoAgent-0.0.1-SNAPSHOT.jar "--spring.config.import=optional:f
 2. `.env` 不会自动生效，需要 `spring.config.import` 或环境变量
 3. Boot 4 默认 Jackson 3（`tools.jackson`），langchain4j 内部用 Jackson 2（`com.fasterxml`），别混用 ObjectMapper
 4. `spring-boot-starter-test` 不加 `scope` 会把 JUnit/Mockito 打进运行时 jar（约 10MB）
-5. `file:` 相对路径基于工作目录，换目录启动 jar 会找不到 `.env`（可用启动参数覆盖）
+5. `file:` 相对路径基于工作目录，换目录启动 jar 会找不到 `.env`
 6. **`@AiService` 的 `tools` 属性填的是 bean 名（`String[]`），不是 Class**；AUTOMATIC 模式下根本不用填
-7. **Windows PowerShell 5.1 默认禁止执行脚本**。本机 `LocalMachine` 策略是 `RemoteSigned`，但仍可能被 IDE 的宿主进程挡住 → 统一用 `pwsh`（7.x），或加 `-ExecutionPolicy Bypass`
-8. **观测坏了会被误读成模型坏了**。第一次跑冒烟得 1/5 全 `(none)`，真实原因是 Controller 在 `finally` 里 `drain()` 把记录丢了；回复文本里明明有假数据。**先看原始证据（reply），再看汇总指标（MISS）**
+7. **Windows PowerShell 5.1 默认禁止执行脚本** → 统一用 `pwsh`（7.x），或加 `-ExecutionPolicy Bypass`
+8. **观测坏了会被误读成模型坏了**。冒烟全 `(none)` 的真实原因是 Controller 把记录丢了；回复文本里明明有假数据。先看原始证据，再看汇总指标
+9. **`setting.xml` ≠ `settings.xml`**。Maven 只读 `~/.m2/settings.xml`，名字少个 `s` 就会被完全忽略（配置内容对也没用）
+10. **两套本地仓库会导致"本地有却 Failed to resolve"**。IDEA 与命令行各自指向不同 repository，Maven 会认为本地缓存"不来自当前仓库"而重新下载。统一到一份 `settings.xml` 即可
+11. **`-D` 参数在 PowerShell 里要加引号**：`"-Dexpression=settings.localRepository"`，否则会被拆成一截生命周期阶段报错
+12. **Mockito 的 `self-attaching` / `dynamic agent` 警告是噪音**：Mockito 5 的 inline mock maker 运行时挂 byte-buddy agent，JDK 21+ 会告警，与服务代码无关

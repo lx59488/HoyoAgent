@@ -33,6 +33,15 @@ public enum ErrorCode {
     // ========== 限流模块错误 8xxx ==========
     RATE_LIMIT_EXCEEDED(8001, "请求过于频繁，请稍后再试"),
 
+
+
+    // ========== 米游社模块错误 9xxx ==========
+    MOYO_NETWORK_ERROR(9001, "米游社服务连接失败"),
+    MOYO_API_ERROR(9002, "米游社接口返回异常"),
+    MOYO_AUTH_EXPIRED(9003, "米游社登录状态已失效，请重新授权"),
+    MOYO_RATE_LIMITED(9004, "米游社请求过于频繁"),
+    MOYO_NEED_VERIFY(9005, "米游社要求人机验证"),
+
     ;
 
 

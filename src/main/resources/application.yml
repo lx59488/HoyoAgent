@@ -14,6 +14,18 @@ langchain4j:
       log-responses: true
       timeout: PT60S
 
+
+
+hoyo:
+  base-url: https://bbs-api.miyoushe.com
+  app-version: "2.117.0"
+  client-type: "4"                       # 4=网页；用了 App 抓包就填 5
+  referer: https://www.miyoushe.com/
+  user-agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/156.0.0.0 Safari/537.36
+  salt: ""                               # 挖到再填，空着也不影响第 1 步
+  timeout: PT10S
+  cookie: ${HOYO_COOKIE:}                # 值放 .env，不进仓库
+
 logging:
   level:
     dev.langchain4j: DEBUG
