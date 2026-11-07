@@ -4,7 +4,7 @@
 > 用法：从上往下做，每完成一条把 `[ ]` 改成 `[x]`。每个阶段结束后打一个 git tag（`phase-1`、`phase-2`…）。
 > 设计原则：**先用假数据学 Agent，再接真实 API**。两条线并行、互不阻塞。
 
-**最后更新：2026-11-05**（P1/P2/P3 完成；P4 骨架完成，已打通第一个只读接口）
+**最后更新：2026-11-07**（P1~P4 完成；P6 纵向切片已通，只留 1 个工具；P3 的 10 条用例表已作废，见 P3 后记）
 
 ---
 
@@ -12,15 +12,19 @@
 
 | 阶段 | 内容 | 产出 | 预估 | 状态 |
 |---|---|---|---|---|
-| P0 | 环境收尾 | 能启动的空工程 | 30 min | 🚧 2 项待办 |
+| P0 | 环境收尾 | 能启动的空工程 | 30 min | 🚧 1 项待办（轮换 key） |
 | P1 | AI 闭环 | `GET /chat` 能对话 | 半天 | ✅ 完成 |
 | P2 | 第一个 Tool（假数据） | 模型自主调用工具 | 1 天 | ✅ 完成 |
-| P3 | 多工具与工具设计 | 10 条用例命中 ≥ 8 | 1 天 | ✅ 完成（7/10 → 8/10） |
-| P4 | 米游社客户端基线 | 控制台打印真实 uid | 2~3 天 | 🚧 骨架完成，验证中 |
+| P3 | 多工具与工具设计 | 10 条用例命中 ≥ 8 | 1 天 | ✅ 完成（7/10 → 8/10）<br>⚠️ 用例表已被 P6 作废 |
+| P4 | 米游社客户端基线 | 控制台打印真实 uid | 2~3 天 | ✅ 完成（错误场景未验） |
 | P5 | 数据契约与错误治理 | 脱敏 + 限流 + DTO | 1~2 天 | 未开始 |
-| P6 | 接入真实数据 | 自然语言查真实战绩 | 半天 | 未开始 |
+| P6 | 接入真实数据 | 自然语言查真实战绩 | 半天 | 🚧 纵向切片已通（1/4 工具） |
 | P7 | 记忆与多轮 | 多轮对话不丢上下文 | 1 天 | 未开始 |
 | P8 | 工程化扩展（选做） | 多账号 / 可观测 / MCP | 长期 | 未开始 |
+
+> **状态校准自 2026-11-07 的代码核对**：P4-5（DeviceIdProvider）、P4-12（关日志）、
+> P6 纵向切片其实都已完成，只是清单没跟上。**这份清单就是项目的单一事实来源，
+> 落后于代码比缺失更危险**——照着旧清单干活会重复劳动。
 
 ---
 
@@ -41,19 +45,28 @@ com.luobo.hoyoagent
 ├── agent/
 │   ├── MihoyoAssistant.java           ← @AiService 接口（无实现，运行时动态代理）
 │   ├── observability/ToolCallRecorder.java
-│   └── tool/FakePlayerTool.java       ← 4 个假工具（P6 会换成真数据）
+│   └── tool/
+│       ├── PlayerTool.java            ← P6：1 个真数据工具（身份来自 cookie，无参数）
+│       └── DecoyTool.java             ← @Profile("decoy") 诱饵，只用于测能力边界
 └── mihoyo/                            ← P4：外部系统客户端（与 agent 完全解耦）
     ├── api/MiyousheApi.java           ← 业务接口：路径 + 参数 → JsonNode
     ├── client/MihoyoHttpClient.java   ← OkHttp 单例 + 统一 header + retcode 检查
+    ├── client/DeviceIdProvider.java   ← 持久化 device_id（配置 > ~/.hoyo/device-id > 生成）
     ├── auth/{Credential, CookieParser, CredentialProvider}.java
+    ├── dto/CharacterDto.java          ← ⚠️ 用 Jackson 2 注解，见附录 C 坑 3
+    ├── enums/MiyousheHost.java        ← BBS / RECORD / TAKUMI 三个 host
+    ├── MihoyoEndpoints.java           ← host 覆盖入口（hoyo.hosts 可改 base url）
     ├── sign/Signer.java               ← DS1；salt 空则不发 DS
     └── config/HoyoProperties.java     ← @ConfigurationProperties(prefix = "hoyo")
 
 src/test/java/...
 └── mihoyo/MiyousheApiTest.java        ← @Tag("network")，真实打米游社
 
-scripts/smoke-agent.ps1                ← P3 冒烟脚本（当前 5 条用例）
+scripts/smoke-agent.ps1                ← 冒烟脚本（8 条用例，2026-11-07 重写）
+scripts/round1.md / round2.md          ← P3 两轮原始输出（历史证据，只读）
+.env.example                           ← 配置模板；真实值只写 .env（已 gitignore）
 docs/ROADMAP.md                        ← 本文件
+docs/mihoyo-auth.md                    ← 多用户登录设计稿（P7/P8 用，未实现）
 ```
 
 接口：`GET /chat?q=`（纯问答）、`GET /agent?q=`（带工具，返回 `{ok, reply, toolsCalled}`）
@@ -72,7 +85,7 @@ docs/ROADMAP.md                        ← 本文件
 - [x] `git init` + 提交，远程 `github.com/lx59488/HoyoAgent`
 - [x] Maven 本地仓库统一：`%USERPROFILE%\.m2\settings.xml` 指向 `D:/software/maven/apache-maven-3.9.6/repository`，命令行与 IDEA 一致
 - [ ] **轮换 DeepSeek API Key** —— 2026-11-02 核对：`.env` 里仍是旧 key
-- [ ] **新建 `.env.example`** —— 2026-11-02 核对：文件不存在
+- [x] **新建 `.env.example`** —— 2026-11-07 已补（含 HOYO_* 说明）；`.gitignore` 只忽略根目录 `.env`
 - [x] logback `1.5.38` 的 CVE-2026-19880 已评估：路径穿越，需要自定义 MDC 拼接 FileAppender 才能触发；本项目无可利用路径，**暂不处理**，等 Boot 4.2 GA 升级时顺带解决
 
 **验收**
@@ -194,11 +207,30 @@ Invoke-RestMethod "http://localhost:8080/chat?q=用一句话介绍你自己"
 **③ 判定口径值得单独记一笔。**
 "多调一个工具算不算错"取决于目标：看答案质量，第 2 条可以算部分命中；看 token 和延迟，它就是失败。当前用「集合完全相等」是最严的口径，宁可误伤。
 
-### 下一步（进 P6 之前必须处理第 9 条）
+### 后记（2026-11-07）：这张表已经作废，但结论仍然有效
 
-- [ ] 给 AI 服务加一条能力边界（`@SystemMessage` 或接口上的说明）：**没有签到 / 点赞 / 发帖能力，遇到这类问题直接说明无法查询，不要用相近工具凑**
-- [ ] 第 2 条二选一：接受冗余（把判定改成「期望集合 ⊆ 实际集合」），或压成本（在详情工具描述里补一句"不要为了确认玩家而重复查询角色列表"）
-- [ ] 把这张表存进 P6 的回归清单——接完真数据重跑一遍，看结果是否退化
+P6 接真数据时才发现一个当初没意识到的事：**假数据把「查谁」编码成了参数，而真接口里身份来自 cookie。**
+一个进程只代表一个绑定账号，`getPlayerCharacters(萝卜)` 这种签名在真实世界里不存在。
+
+- 10 条用例的**期望值全部作废**——不是过期，是前提错了，不存在"架构回退后又能复用"的场景
+- 已作废的只是**脚本**：旧脚本位于 `git log -p -- scripts/smoke-agent.ps1`
+- 保留下来的是**这张表本身**（在本文档 + `scripts/round1.md` / `round2.md`），因为需要长期复用的是"结果"
+- 新脚本 8 条用例对齐新契约，见 `scripts/smoke-agent.ps1` 头部注释
+
+**下一步三条的处置：**
+
+- [x] 能力边界已加 `@SystemMessage`（P6 切片时同步收窄，见 `MihoyoAssistant`）
+- [ ] 第 2 条不再适用（详情工具已下线），留作 P8 恢复多工具时再看
+- [x] 表已进回归清单 → 但**以新契约重写**，不是照抄旧期望值
+
+### 为什么第 9 条不能靠"删掉工具"通过
+
+现在的系统里没有签到工具，"问签到不调用"必然成立——**这是恒真式，什么也没证明**。
+真正的检验是：工具在、描述很诱人、SystemMessage 明令禁止，模型选哪边？
+
+为此加了 `DecoyTool`（`@Profile("decoy")`，默认不注册），用
+`"-Dspring-boot.run.profiles=decoy"` 启动后，冒烟第 5~8 条才变成真测试。
+**这条经验可以直接搬到任何 agent 项目：诱饵是测"边界"的唯一办法，缺席不是。**
 
 ### 常见坑
 
@@ -209,31 +241,37 @@ Invoke-RestMethod "http://localhost:8080/chat?q=用一句话介绍你自己"
 
 ---
 
-## P4 · 米游社客户端基线 🚧
+## P4 · 米游社客户端基线 ✅
 
 **目标**：纯 Java 打通**一个**只读接口。这一步不许碰 AI，也不许改 Agent 代码。
 **前置**：用**小号**。不要用主账号做实验。
-**现状**：骨架 6 个类已落地，`getAppConfig` 已打通并验证；但 salt 未知、device_id 未实现、错误场景未验证。
+**现状**：带 cookie 的 `character/list` 已打通，控制台打出了真实角色（安柏 Lv.6 / 旅行者 Lv.5 / 诺艾尔 Lv.1）。
+**但「错误场景」这一格还很空**——所以是"通了"，不是"稳了"。
 
 ### 已完成
 
-- [x] P4-1 包结构落地：`mihoyo.{api, auth, client, config, sign}`（顶层 `mihoyo`，不是 `adapter.mihoyo`）
+- [x] P4-1 包结构落地：`mihoyo.{api, auth, client, config, sign, dto, enums}`（顶层 `mihoyo`，不是 `adapter.mihoyo`）
 - [x] P4-2 `Credential`（record；`toString()` 已脱敏，避免 token 进日志）
 - [x] P4-3 `CookieParser`（`ltuid_v2` > `ltuid` > `account_id_v2` > `account_id`；空值跳过；引号剥离）
 - [x] P4-4 `Signer`：DS1 结构（`md5("salt={salt}&t={t}&r={r}")`，输出 `t,r,hash`）；salt 从 `hoyo.salt` 读，**空则不发 DS 头**
+- [x] P4-5 `DeviceIdProvider`：优先级「配置 `hoyo.device-id` > `~/.hoyo/device-id` > 生成 UUID」，原子写入，日志不打印值
 - [x] P4-6 `MihoyoHttpClient`：OkHttp 单例、统一 header、HTTP 状态检查、retcode 检查、异常映射到 9xxx
 - [x] P4-8 第一个只读接口：`GET /apihub/wapi/getAppConfig?gids=2` → `retcode=0`，拿到完整 `config`（60+ key）
+- [x] P4-12 `log-requests` / `log-responses` 已为 `false`，`dev.langchain4j` 已降到 `WARN`
 
 **实测结论（重要）**：`getAppConfig` **不校验 DS**。三种情况均返回 `retcode=0`——带原始 DS、带伪造 DS、完全不带 DS。所以「先打通、后签名」的策略成立。
 
+**第二个实测结论（2026-11-07）**：`POST /game_record/app/genshin/api/character/list` **需要 cookie，但不需要 DS**——
+`salt` 为空时完全不发 DS 头，照样 `retcode=0`。
+所以附录 A 那个"2.117.0 的 salt 挖不到"**已经不阻塞任何一条查询路线**，别再为它花晚上。
+
 ### 待做
 
-- [ ] **P4-5 `DeviceIdProvider`**：当前客户端完全没发 `x-rpc-device_id`。只读配置接口不需要，但需要 cookie 的接口大概率会因此失败
-- [ ] P4-7 日志脱敏：目前只靠 `Credential.toString()` + 不打印 header，还没有拦截器兜底
+- [ ] P4-7 日志脱敏：目前只靠 `Credential.toString()` + 不打印 header，还没有拦截器兜底。**`.env` 里已经有真 cookie 了，这条从"可选"升级为"该做"**
 - [ ] P4-9 retcode 映射表补全：现有 5 条（-100/10001/-5003/10101/1034）**全是假设**，必须实测
 - [ ] P4-10 三种错误场景各验证一次：错 cookie、过期 cookie、断网
 - [ ] P4-11 离线单测：`Signer` 固定输入 → 固定输出；`CookieParser` 各种脏输入
-- [ ] P4-12 关掉 `log-requests` / `log-responses`，`dev.langchain4j: DEBUG` 降级——**还没做**，接 cookie 之前必须做
+- [ ] **P4-13 `CharacterDto` 的字段映射从未验证过**：`MiyousheApiTest` 只打印了 `name` 和 `level`，`actived_constellation_num` → `constellation` 这条没人看过。而小号角色命座全是 0，测了也分不出"映射成功"和"没映射上"。做法：录一份真实响应存 `src/test/resources/fixtures/`，写离线断言——顺手就把 P8 的回放测试开了头
 
 ### 已修复
 
@@ -242,7 +280,7 @@ Invoke-RestMethod "http://localhost:8080/chat?q=用一句话介绍你自己"
 ### 验收
 
 - [x] 命令行打印出 `retcode=0` 和真实的配置数据
-- [ ] 拿到自己的 **uid + 昵称**（需要换一个带 cookie 的接口，这才是 P4 的真正终点）
+- [x] 拿到自己的 **uid + 昵称**——`character/list` 回来的是真实角色，这条路走通了（2026-11-07）
 - [ ] 三种错误场景给出**不同**的异常信息
 - [ ] 日志里搜不到任何真实 cookie 值
 
@@ -272,24 +310,52 @@ Invoke-RestMethod "http://localhost:8080/chat?q=用一句话介绍你自己"
 
 ---
 
-## P6 · 接入真实数据
+## P6 · 接入真实数据 🚧
 
-**目标**：把假工具换成真客户端。**`@AiService` 接口和工具签名应该一行都不用改。**
+**目标**：把假工具换成真客户端。~~**`@AiService` 接口和工具签名应该一行都不用改。**~~
+**结果**：这句话是错的，而且错得很有价值——见下面 P6-4 复盘。
 
-- [ ] P6-1 替换 `FakePlayerTool` 里的 `DB` / `NOTES` / `ABYSS` 三张表
-- [ ] P6-2 确认 `MihoyoAssistant` 与工具签名零改动
-- [ ] P6-3 端到端：自然语言 → 真实数据 → 可读回答
-- [ ] P6-4 复盘：如果工具签名被迫改了，记录当初抽象错在哪
+**现状（2026-11-07）**：纵向切片通了。1 个工具走真数据，其余 3 个已删除。
+「自然语言 → 真实数据 → 中文回答」全链路已验证。
+
+- [x] P6-1 假的 `DB` / `NOTES` / `ABYSS` 三张表和注释掉的 `@Tool` 已清除，`FakePlayerTool` 改名 `PlayerTool`
+- [ ] P6-2 确认 `MihoyoAssistant` 与工具签名零改动 —— **没做到，见 P6-4**
+- [x] P6-3 端到端：`getPlayerCharacters()` → `character/list` → 真实角色（安柏 Lv.6 / 旅行者 Lv.5 / 诺艾尔 Lv.1）
+- [x] P6-4 复盘：见下
 - [ ] P6-5 （可选）在 `agent` 里加 `PlayerQueryPort` 接口，让 `mihoyo` 反向实现，依赖方向变成"外层依赖内层"
+- [ ] P6-6 恢复 `character/detail`（`docs/mihoyo-auth.md` 记着实测可用，但代码里还没有）
+- [ ] P6-7 `dailyNote` / `spiralAbyss` 二选一：接真数据，或明确写"不做"。
+
+### P6-4 复盘：抽象错在哪
+
+**事实**：签名被迫从 `getPlayerCharacters(String nickname)` 改成了 `getPlayerCharacters()`。
+
+**错在哪**：假数据把「查谁」编码成了**方法的输入**。而真接口里，「谁」由 cookie 代表的绑定账号决定，
+一个进程只代表一个人。模型既不知道、也**不应该**知道 uid——
+
+> 假数据让你以为「玩家」是输入，其实「玩家」是会话。
+
+这不只是签名不好看，是一条安全边界：工具参数里只要出现 `uid` / `nickname` / `accountId`，
+模型就有能力填别人的值。多用户场景下身份必须由框架注入（`@ToolMemoryId`），
+这条规则写在 `docs/mihoyo-auth.md` §7，从第一天就该执行。
+
+**怎么避免**：写假数据时问一句——**这个参数在真接口里存在吗？** 如果它对应的是"谁在调用"，
+那它属于会话上下文，不属于方法参数。
 
 **验收**
 
-- [ ] 「我原神练度怎么样」能拿到真实数据并组织成中文回答
-- [ ] cookie 失效时，模型回答「登录已过期，请重新授权」而不是崩溃
+- [x] 「我有哪些原神角色」能拿到真实数据并组织成中文回答
+- [ ] 「我原神练度怎么样」——需要 `character/detail`，P6-6
+- [ ] cookie 失效时，模型回答「登录已过期，请重新授权」而不是崩溃（工具已把 `BusinessException` 转成文字返回，待实测）
 
 ---
 
 ## P7 · 记忆与多轮
+
+> **开始前的提醒**：多轮的价值体现在「省略了主语也能接上」。
+> 当前只有 1 个无参工具，能测的是"你还记得刚才聊的是安柏吗"，
+> 测不了"那深渊呢"——因为深渊工具不存在。
+> 所以 P6-6/P6-7 至少补回一个工具，P7 的实验才立得住。
 
 - [ ] P7-1 接入 `ChatMemory`（`MessageWindowChatMemory` / `TokenWindowChatMemory`）
 - [ ] P7-2 会话隔离：按 userId 分配独立 memory
@@ -339,6 +405,7 @@ Invoke-RestMethod "http://localhost:8080/chat?q=用一句话介绍你自己"
 | 签到必备头 | `DS`、`x-rpc-signgame: hk4e`、`x-rpc-app_version`、`x-rpc-client_type`、`x-rpc-device_id`、`x-rpc-device_fp`、`Origin`/`Referer: https://act.mihoyo.com/` | 同上 |
 | 签到 body | `{act_id, region, uid}`，**act_id 每期变**，从签到页活动信息接口取 | 同上 |
 | `getAppConfig` 是否需要认证 | **不需要** cookie，也不需要 DS（伪造/缺失 DS 均返回 retcode 0） | 三种情况实测 |
+| `character/list` 是否需要认证 | **需要** cookie（ltoken）；**不需要** DS（salt 为空照样 retcode 0） | 2026-11-07 实测 |
 | DS 输出格式 | `{t},{r},{md5}` | 抓包 + 文档 |
 | DS1 | `md5("salt={salt}&t={t}&r={r}")`，`r` = 6 位 `[A-Za-z0-9]` | 文档 + 抓包 |
 | DS2 | `md5("salt={salt}&t={t}&r={r}&b={body}&q={query}")`，`r` = 100000~200000 整数 | 文档 |
@@ -354,7 +421,7 @@ Invoke-RestMethod "http://localhost:8080/chat?q=用一句话介绍你自己"
 | `ltuid` / `stuid` 区别 | | |
 | `ltoken` / `stoken` 用途与有效期 | | |
 | `cookie_token` 获取方式 | | |
-| **2.117.0 的 salt** | ❓ 未找到 | 133 个公开值 + 7967 个从网页 bundle 挖出的候选，全部不匹配 |
+| **2.117.0 的 salt** | ❓ 未找到，**但不阻塞** | 133 个公开值 + 7967 个从网页 bundle 挖出的候选，全部不匹配。已实测查询类接口不吃 DS，只在签到这类写接口上才需要——挖不到就先不挖 |
 | `device_id` 生成规则 | | 自己定的规则也要记 |
 | retcode 分类表 | | 限流 / 失效 / 验证 / 致命 |
 | 每日签到刷新时间 | | 以实测为准 |
@@ -394,6 +461,10 @@ t = 1793615718, r = x4jM6S, DS = 4ba0172d3a9d270bf488b98272ccfee9
 .\mvnw.cmd -B -ntp -U clean test
 
 # 冒烟：Agent 工具用例（用 pwsh 7）
+pwsh -NoProfile -File .\scripts\smoke-agent.ps1
+
+# 冒烟·诱饵模式：让「能力外」的用例变成真测试（先换这个 profile 启动服务）
+.\mvnw.cmd -B -ntp spring-boot:run "-Dspring-boot.run.profiles=decoy"
 pwsh -NoProfile -File .\scripts\smoke-agent.ps1
 
 # 看依赖版本是否收敛
@@ -445,3 +516,5 @@ java -jar target\HoyoAgent-0.0.1-SNAPSHOT.jar "--spring.config.import=optional:f
 10. **两套本地仓库会导致"本地有却 Failed to resolve"**。IDEA 与命令行各自指向不同 repository，Maven 会认为本地缓存"不来自当前仓库"而重新下载。统一到一份 `settings.xml` 即可
 11. **`-D` 参数在 PowerShell 里要加引号**：`"-Dexpression=settings.localRepository"`，否则会被拆成一截生命周期阶段报错
 12. **Mockito 的 `self-attaching` / `dynamic agent` 警告是噪音**：Mockito 5 的 inline mock maker 运行时挂 byte-buddy agent，JDK 21+ 会告警，与服务代码无关
+13. **删了源文件不等于删了类**：`mvn test` 不会清理 `target/classes` 里的旧 `.class`，Spring 组件扫描照样扫到它。2026-11-07 改名 `FakePlayerTool` → `PlayerTool` 后直接 `test`，报 `IllegalConfigurationException: Duplicated definition for tool: getPlayerCharacters`。**动过类名/包名/删过类，一律用 `clean test`**
+14. **"不调用工具"的用例可能是恒真的**：工具不存在时，模型当然不会调用它。测能力边界必须放诱饵（`DecoyTool`），否则通过与否都不含信息
