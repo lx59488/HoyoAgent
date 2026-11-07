@@ -9,23 +9,26 @@ langchain4j:
     chat-model:
       base-url: ${DS_BASE_URL}
       api-key: ${DS_API_KEY}
-      model-name: ${DS_MODEL_NAME} # 模型名称
-      log-requests: true
-      log-responses: true
+      model-name: ${DS_MODEL_NAME}
+      log-requests: false
+      log-responses: false
       timeout: PT60S
 
-
-
+# hosts 不配：默认值写在 MiyousheHost 枚举里，需要覆盖时才加
+#   hosts:
+#     record: http://127.0.0.1:9999
 hoyo:
-  base-url: https://bbs-api.miyoushe.com
   app-version: "2.117.0"
-  client-type: "4"                       # 4=网页；用了 App 抓包就填 5
-  referer: https://www.miyoushe.com/
-  user-agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/156.0.0.0 Safari/537.36
-  salt: ""                               # 挖到再填，空着也不影响第 1 步
+  client-type: "5"                       # 5 = App 端（与抓包一致）
+  referer: https://webstatic.mihoyo.com/
+  user-agent: Mozilla/5.0 (Linux; Android 12; V2366GA Build/V417IR; wv) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/110.0.5481.154 Mobile Safari/537.36 miHoYoBBS/2.117.0
+  salt: ""                               # 挖到再填；空则不发 DS
   timeout: PT10S
-  cookie: ${HOYO_COOKIE:}                # 值放 .env，不进仓库
+  device-id: ${HOYO_DEVICE_ID:}          # 空 = 自动生成；复现已有会话时必须填抓包值
+  cookie: ${HOYO_COOKIE:}
+  role-id: ${HOYO_ROLE_ID:}
+  server: ${HOYO_SERVER:cn_gf01}
 
 logging:
   level:
-    dev.langchain4j: DEBUG
+    dev.langchain4j: WARN
