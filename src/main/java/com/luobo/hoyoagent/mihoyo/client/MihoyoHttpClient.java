@@ -108,6 +108,8 @@ public class MihoyoHttpClient {
     private static ErrorCode mapRetcode(int retcode) {
         return switch (retcode) {
             case -100, 10001 -> ErrorCode.MOYO_AUTH_EXPIRED;
+            case -10001 -> ErrorCode.MOYO_SIGN_INVALID;
+            case 10102 -> ErrorCode.MOYO_DATA_PRIVATE;
             case -5003, 10101 -> ErrorCode.MOYO_RATE_LIMITED;
             case 1034 -> ErrorCode.MOYO_NEED_VERIFY;
             default -> ErrorCode.MOYO_API_ERROR;

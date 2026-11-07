@@ -1,10 +1,13 @@
 package com.luobo.hoyoagent.mihoyo.api;
 
 import com.luobo.hoyoagent.mihoyo.client.MihoyoHttpClient;
+import com.luobo.hoyoagent.mihoyo.dto.CharacterDto;
 import com.luobo.hoyoagent.mihoyo.enums.MiyousheHost;
 import org.springframework.stereotype.Component;
 import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
 
+import java.util.List;
 import java.util.Map;
 
 @Component
@@ -12,19 +15,30 @@ public class MiyousheApi {
 
     private final MihoyoHttpClient http;
 
-    public MiyousheApi(MihoyoHttpClient http) {
+    private final ObjectMapper mapper;
+
+
+    public MiyousheApi(MihoyoHttpClient http, ObjectMapper mapper) {
         this.http = http;
+        this.mapper = mapper;
     }
+
 
     public JsonNode getAppConfig(int gids) {
         return http.get(MiyousheHost.BBS, "/apihub/wapi/getAppConfig",
                 Map.of("gids", String.valueOf(gids)), false);
     }
 
-    public JsonNode getCharacters(String roleId, String server) {
-        return http.post(MiyousheHost.RECORD,
+    public List<CharacterDto> getCharacters(String roleId, String server) {
+        JsonNode result = http.post(MiyousheHost.RECORD,
                 "/game_record/app/genshin/api/character/list",
                 Map.of("server", server, "role_id", roleId, "sort_type", 1),
                 true);
+        CharacterListData parsed = mapper.treeToValue(result, CharacterListData.class);
+        return parsed.list();
     }
+
+    public record CharacterListData(List<CharacterDto> list) {}
+
+
 }
