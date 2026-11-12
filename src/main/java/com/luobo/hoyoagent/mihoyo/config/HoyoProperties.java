@@ -12,10 +12,7 @@ public record HoyoProperties(
         String clientType,
         String userAgent,
         String referer,
-        String salt,
         Duration timeout,
-        String deviceId,
-        String roleId,
-        String server
+        String deviceId
 ) {
 }

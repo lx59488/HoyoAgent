@@ -42,7 +42,7 @@ public enum ErrorCode {
     MOYO_RATE_LIMITED(9004, "米游社请求过于频繁"),
     MOYO_NEED_VERIFY(9005, "米游社要求人机验证"),
     MOYO_SIGN_INVALID(9006, "米游社非法签名"),
-    MOYO_DATA_PRIVATE(9006, "战绩未公开"),
+    MOYO_DATA_PRIVATE(9007, "战绩未公开"),
 
     ;
 

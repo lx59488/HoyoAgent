@@ -18,9 +18,10 @@ public class CookieParser {
                 }
             }
         }
-        String uid = firstPresent(map, "ltuid_v2", "ltuid", "account_id_v2", "account_id");
+        String uid = firstPresent(map, "ltuid_v2", "ltuid", "account_id_v2", "account_id", "stuid");
         String mid = firstPresent(map, "ltmid_v2", "mid", "account_mid_v2");
-        return new Credential(rawCookie == null ? "" : rawCookie, uid, mid);
+        String stoken = firstPresent(map, "stoken", "stoken_v2");
+        return new Credential(rawCookie == null ? "" : rawCookie, uid, mid, stoken);
     }
 
 

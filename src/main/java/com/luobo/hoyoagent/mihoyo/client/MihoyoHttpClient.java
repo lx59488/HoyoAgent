@@ -5,7 +5,6 @@ import com.luobo.hoyoagent.common.exception.ErrorCode;
 import com.luobo.hoyoagent.mihoyo.MihoyoEndpoints;
 import com.luobo.hoyoagent.mihoyo.auth.CredentialProvider;
 import com.luobo.hoyoagent.mihoyo.enums.MiyousheHost;
-import com.luobo.hoyoagent.mihoyo.sign.Signer;
 import com.luobo.hoyoagent.mihoyo.config.HoyoProperties;
 import okhttp3.*;
 import org.slf4j.Logger;
@@ -29,12 +28,10 @@ public class MihoyoHttpClient {
     private final CredentialProvider credentialProvider;
     private final DeviceIdProvider  deviceIdProvider;
     private final MihoyoEndpoints endpoints;
-    private final Signer signer;
 
     public MihoyoHttpClient(HoyoProperties props,
                             ObjectMapper mapper,
                             CredentialProvider credentialProvider,
-                            Signer signer,
                             DeviceIdProvider deviceIdProvider,
                             MihoyoEndpoints endpoints) {
         this.props = props;
@@ -42,7 +39,6 @@ public class MihoyoHttpClient {
         this.credentialProvider = credentialProvider;
         this.deviceIdProvider = deviceIdProvider;
         this.endpoints = endpoints;
-        this.signer = signer;
         this.client = new OkHttpClient.Builder()
                 .connectTimeout(props.timeout())
                 .readTimeout(props.timeout())
@@ -99,7 +95,6 @@ public class MihoyoHttpClient {
                 throw new BusinessException(ErrorCode.MOYO_AUTH_EXPIRED);
             }
             req.header("Cookie", credentialProvider.get().cookieHeader());
-            signer.dsHeader().ifPresent(ds -> req.header("DS", ds));
         }
         return req;
     }
@@ -116,3 +111,4 @@ public class MihoyoHttpClient {
         };
     }
 }
+
