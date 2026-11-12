@@ -4,7 +4,7 @@
 > 用法：从上往下做，每完成一条把 `[ ]` 改成 `[x]`。每个阶段结束后打一个 git tag（`phase-1`、`phase-2`…）。
 > 设计原则：**先用假数据学 Agent，再接真实 API**。两条线并行、互不阻塞。
 
-**最后更新：2026-11-07**（P1~P4 完成；P6 纵向切片已通，只留 1 个工具；P3 的 10 条用例表已作废，见 P3 后记）
+**最后更新：2026-11-12**（P1~P6 纵向切片已通；新增 P9「登录与签到」，扫码登录代码就绪待真机验收；P3 的 10 条用例表已作废，见 P3 后记）
 
 ---
 
@@ -18,9 +18,10 @@
 | P3 | 多工具与工具设计 | 10 条用例命中 ≥ 8 | 1 天 | ✅ 完成（7/10 → 8/10）<br>⚠️ 用例表已被 P6 作废 |
 | P4 | 米游社客户端基线 | 控制台打印真实 uid | 2~3 天 | ✅ 完成（错误场景未验） |
 | P5 | 数据契约与错误治理 | 脱敏 + 限流 + DTO | 1~2 天 | 未开始 |
-| P6 | 接入真实数据 | 自然语言查真实战绩 | 半天 | 🚧 纵向切片已通（1/4 工具） |
+| P6 | 接入真实数据 | 自然语言查真实战绩 | 半天 | 🚧 2 个工具（角色/签到）；角色查询受 `5003` 限制 |
 | P7 | 记忆与多轮 | 多轮对话不丢上下文 | 1 天 | 未开始 |
 | P8 | 工程化扩展（选做） | 多账号 / 可观测 / MCP | 长期 | 未开始 |
+| P9 | 登录与签到 | 扫码拿 stoken，能签当天 | 2~3 天 | 🚧 登录+签到已通，缺定时调度 |
 
 > **状态校准自 2026-11-07 的代码核对**：P4-5（DeviceIdProvider）、P4-12（关日志）、
 > P6 纵向切片其实都已完成，只是清单没跟上。**这份清单就是项目的单一事实来源，
@@ -41,36 +42,55 @@ com.luobo.hoyoagent
 ├── adapter/
 │   └── http/
 │       ├── ChatController.java        ← P1：纯模型问答（对照组）
-│       └── AgentController.java       ← P2：走 AiService，回传 toolsCalled
+│       ├── AgentController.java       ← P2：走 AiService，回传 toolsCalled
+│       ├── AuthController.java        ← P9：扫码登录 + 角色列表 + v2 刷新
+│       └── CheckinController.java     ← P9：POST /api/checkin
 ├── agent/
 │   ├── MihoyoAssistant.java           ← @AiService 接口（无实现，运行时动态代理）
 │   ├── observability/ToolCallRecorder.java
 │   └── tool/
-│       ├── PlayerTool.java            ← P6：1 个真数据工具（身份来自 cookie，无参数）
+│       ├── PlayerTool.java            ← P6：真数据；角色 uid 改为自动发现（P9）
+│       ├── CheckinTool.java           ← P9：每日签到（无身份参数）
 │       └── DecoyTool.java             ← @Profile("decoy") 诱饵，只用于测能力边界
 └── mihoyo/                            ← P4：外部系统客户端（与 agent 完全解耦）
     ├── api/MiyousheApi.java           ← 业务接口：路径 + 参数 → JsonNode
     ├── client/MihoyoHttpClient.java   ← OkHttp 单例 + 统一 header + retcode 检查
     ├── client/DeviceIdProvider.java   ← 持久化 device_id（配置 > ~/.hoyo/device-id > 生成）
-    ├── auth/{Credential, CookieParser, CredentialProvider}.java
+    ├── auth/Credential.java           ← 含 stoken；toString 不泄露
+    ├── auth/CookieParser.java         ← 解析 stoken / mid / ltuid
+    ├── auth/CredentialProvider.java   ← 优先级：带 stoken 的文件 > .env
+    ├── auth/CredentialStore.java      ← ~/.hoyo/credential.properties（明文，owner-only）
+    ├── auth/QrLoginService.java       ← P9：WAITING→SCANNED→BOUND 状态机 + refreshV2
+    ├── auth/passport/PassportDevice.java ← 持久化扫码 device_id + device_fp
+    ├── auth/passport/PassportClient.java ← 两套头：扫码系 / 换票系；含 v2 换取
+    ├── checkin/MiyousheCheckinGame.java ← act_id / host / signgame 常量
+    ├── checkin/LunaClient.java        ← info / sign / home（签到头 + DS1）
+    ├── checkin/CheckinService.java    ← info→sign→info 复验、幂等、错误翻译
+    ├── role/GameRoleService.java      ← 角色自动发现（10 分钟缓存）
+    ├── dto/GameRole.java              ← 绑定角色
     ├── dto/CharacterDto.java          ← ⚠️ 用 Jackson 2 注解，见附录 C 坑 3
     ├── enums/MiyousheHost.java        ← BBS / RECORD / TAKUMI 三个 host
     ├── MihoyoEndpoints.java           ← host 覆盖入口（hoyo.hosts 可改 base url）
-    ├── sign/Signer.java               ← DS1；salt 空则不发 DS
+    ├── sign/DsSigner.java             ← DS1 / DS2 公式与 md5（唯一签名入口）
     └── config/HoyoProperties.java     ← @ConfigurationProperties(prefix = "hoyo")
 
 src/test/java/...
-└── mihoyo/MiyousheApiTest.java        ← @Tag("network")，真实打米游社
+├── mihoyo/MiyousheApiTest.java        ← @Tag("network")，真实打米游社
+├── mihoyo/sign/DsSignerTest.java      ← 锁 DS 公式（用外部算出的 md5 向量）
+├── mihoyo/auth/CookieParserTest.java
+└── mihoyo/auth/passport/PassportDeviceTest.java / PassportClientTest.java
 
 scripts/smoke-agent.ps1                ← 冒烟脚本（8 条用例，2026-11-07 重写）
+scripts/login-qr.ps1                   ← P9：建码 → 存 PNG → 轮询到 BOUND
 scripts/round1.md / round2.md          ← P3 两轮原始输出（历史证据，只读）
 scripts/round3.md / round3-decoy.md    ← 新契约下两种 profile 的实测结果（均 8/8）
 .env.example                           ← 配置模板；真实值只写 .env（已 gitignore）
 docs/ROADMAP.md                        ← 本文件
-docs/mihoyo-auth.md                    ← 多用户登录设计稿（P7/P8 用，未实现）
+docs/mihoyo-auth.md                    ← 登录/多用户设计稿；A/B 已落地（P9）
 ```
 
-接口：`GET /chat?q=`（纯问答）、`GET /agent?q=`（带工具，返回 `{ok, reply, toolsCalled}`）
+接口：`GET /chat?q=`（纯问答）、`GET /agent?q=`（带工具，返回 `{ok, reply, toolsCalled}`）、
+`POST /api/auth/qr` + `GET /api/auth/qr/{ticket}`（扫码绑定）
 
 **结构决策**：原计划放 `adapter.mihoyo`，实际改为顶层 `mihoyo/`。原因是后续会有多个入站适配器（http / onebot / console），把「外部系统客户端」提到顶层更好表达边界。约定：**`adapter` 只表示入站，`mihoyo` 表示出站**。
 
@@ -272,7 +292,8 @@ P6 接真数据时才发现一个当初没意识到的事：**假数据把「查
 - [x] P4-1 包结构落地：`mihoyo.{api, auth, client, config, sign, dto, enums}`（顶层 `mihoyo`，不是 `adapter.mihoyo`）
 - [x] P4-2 `Credential`（record；`toString()` 已脱敏，避免 token 进日志）
 - [x] P4-3 `CookieParser`（`ltuid_v2` > `ltuid` > `account_id_v2` > `account_id`；空值跳过；引号剥离）
-- [x] P4-4 `Signer`：DS1 结构（`md5("salt={salt}&t={t}&r={r}")`，输出 `t,r,hash`）；salt 从 `hoyo.salt` 读，**空则不发 DS 头**
+- [x] P4-4 DS1 结构（`md5("salt={salt}&t={t}&r={r}")`，输出 `t,r,hash`）—— 当时放在 `Signer` + `hoyo.salt`；
+  **P9 已删除**（查询接口实测不吃 DS），统一到 `DsSigner`
 - [x] P4-5 `DeviceIdProvider`：优先级「配置 `hoyo.device-id` > `~/.hoyo/device-id` > 生成 UUID」，原子写入，日志不打印值
 - [x] P4-6 `MihoyoHttpClient`：OkHttp 单例、统一 header、HTTP 状态检查、retcode 检查、异常映射到 9xxx
 - [x] P4-8 第一个只读接口：`GET /apihub/wapi/getAppConfig?gids=2` → `retcode=0`，拿到完整 `config`（60+ key）
@@ -334,8 +355,8 @@ P6 接真数据时才发现一个当初没意识到的事：**假数据把「查
 **目标**：把假工具换成真客户端。~~**`@AiService` 接口和工具签名应该一行都不用改。**~~
 **结果**：这句话是错的，而且错得很有价值——见下面 P6-4 复盘。
 
-**现状（2026-11-07）**：纵向切片通了。1 个工具走真数据，其余 3 个已删除。
-「自然语言 → 真实数据 → 中文回答」全链路已验证。
+**现状（2026-11-12）**：纵向切片通了，现在有 2 个真数据工具（`PlayerTool` 角色 / `CheckinTool` 签到）。
+「自然语言 → 真实数据 → 中文回答」全链路已验证。角色查询在换号后受米游社 `5003` 限制（见 P9-10）。
 
 - [x] P6-1 假的 `DB` / `NOTES` / `ABYSS` 三张表和注释掉的 `@Tool` 已清除，`FakePlayerTool` 改名 `PlayerTool`
 - [ ] P6-2 确认 `MihoyoAssistant` 与工具签名零改动 —— **没做到，见 P6-4**
@@ -400,6 +421,34 @@ P6 接真数据时才发现一个当初没意识到的事：**假数据把「查
 
 ---
 
+## P9 · 登录与签到（2026-11-12 起）
+
+> 目标：把「手填 cookie」换成「扫码一次，之后自动签到」。
+> 设计细节与协议事实都在 [`docs/mihoyo-auth.md`](mihoyo-auth.md)，这里只放进度。
+
+- [x] P9-1 `DsSigner`：DS1 / DS2 两条公式，md5 用外部向量锁住
+- [x] P9-2 `PassportDevice`：持久化扫码 `device_id` + `device_fp`（不持久化会 `-3503`）
+- [x] P9-3 `PassportClient`：建码 / 轮询 / 换 ltoken / 换 cookie_token / **v2 换取**
+- [x] P9-4 `POST /api/auth/qr` + PNG + 轮询状态机；成功写 `~/.hoyo/credential.properties`
+- [x] P9-5 真机扫码：`WAITING→SCANNED→BOUND`，stoken/ltoken/cookie_token 全拿到
+- [x] P9-6 `luna/info` 复测 —— **结论被推翻**：签到认 `cookie_token`+`account_id`，不是 stoken
+- [x] P9-7 三游戏签到打通：星铁/绝区零真签成功，原神当日已签返回 `ALREADY`；幂等已验证
+- [x] P9-7b 角色自动发现（`GameRoleService`），替掉写死的 `HOYO_ROLE_ID`
+- [ ] P9-8 `@Scheduled` 每天 00:10 + 当日记录幂等（先文件，多用户再上库）
+- [ ] P9-9 stoken 失效时主动提示重新扫码（`/api/auth/refresh` 失败 → 通知）
+- [ ] P9-10 排查 `character/list` 的 `5003`（新账号不通、旧账号通；不是请求头问题）
+
+**验收**：连续 3 天自动签到成功，且 `~/.hoyo/credential.properties` 不用再动。
+
+**开工命令**：
+
+```powershell
+.\mvnw.cmd -B -ntp spring-boot:run        # 终端 1
+pwsh -NoProfile -File .\scripts\login-qr.ps1   # 终端 2
+```
+
+---
+
 ## 学习期不要做的事
 
 - ❌ 向量库 / RAG（还没有非结构化文本需求）
@@ -420,9 +469,12 @@ P6 接真数据时才发现一个当初没意识到的事：**假数据把「查
 | 项目 | 值 | 来源 |
 |---|---|---|
 | BBS 接口 host | `bbs-api.miyoushe.com` | 网页抓包（client_type=4） |
-| 签到接口 | `POST https://api-takumi.mihoyo.com/event/luna/hk4e/sign` | App 抓包（client_type=5） |
-| 签到必备头 | `DS`、`x-rpc-signgame: hk4e`、`x-rpc-app_version`、`x-rpc-client_type`、`x-rpc-device_id`、`x-rpc-device_fp`、`Origin`/`Referer: https://act.mihoyo.com/` | 同上 |
-| 签到 body | `{act_id, region, uid}`，**act_id 每期变**，从签到页活动信息接口取 | 同上 |
+| 签到接口 | `POST https://api-takumi.mihoyo.com/event/luna/sign`（act_id 走 body；绝区零换成 `act-nap-api.mihoyo.com/event/luna/zzz`） | App 抓包 + FufuLauncher 源码 |
+| 签到必备头 | `DS`、`x-rpc-signgame: hk4e`、`x-rpc-app_version`、`x-rpc-client_type`、`x-rpc-device_id`、`x-rpc-device_fp`、`x-rpc-channel: miyousheluodi`、`Origin`/`Referer: https://act.mihoyo.com/` | 同上 |
+| 签到 body | `{act_id, region, uid}`；**act_id 不是每期变**，FufuLauncher 里是常量（原神 `e202311201442471`） | 2026-11-12 核对源码 |
+| 签到 cookie | **`cookie_token` + `account_id`（两个都要）**；stoken/ltoken 单独都不行 | 11-12 对照实验 |
+| 战绩 cookie | `ltoken_v2`；只有 v1 会得到无 message 的 `5003` | 11-12 实测 |
+| 签到实测 | 星铁 `103871907`、绝区零 `15911914` 真签成功；原神 `100848866` 当日已签 | 11-12 |
 | `getAppConfig` 是否需要认证 | **不需要** cookie，也不需要 DS（伪造/缺失 DS 均返回 retcode 0） | 三种情况实测 |
 | `character/list` 是否需要认证 | **需要** cookie（ltoken）；**不需要** DS（salt 为空照样 retcode 0） | 2026-11-07 实测 |
 | DS 输出格式 | `{t},{r},{md5}` | 抓包 + 文档 |
@@ -432,17 +484,31 @@ P6 接真数据时才发现一个当初没意识到的事：**假数据把「查
 | salt 表 | 133 个历史值（截止 2.71.1） | [issue #1](https://github.com/UIGF-org/mihoyo-api-collect/issues/1) |
 | 观测到的 app_version | 网页 `2.102.0`；App `2.117.0` | 两次抓包 |
 
+### 已确认（2026-11-12 实测 / 源码核对）
+
+| 项目 | 值 | 依据 |
+|---|---|---|
+| App 登录码建码 | `POST https://passport-api.mihoyo.com/account/ma-cn-passport/app/createQRLogin`，body `{}` | 本机实测 `retcode=0`，返回 `ticket` + `login-platform` url |
+| App 登录码轮询 | `POST …/app/queryQRLoginStatus`，body `{"ticket":"…"}`；`status=Created/Scanned/Confirmed` | 实测 `retcode=0` / `status=Created` |
+| device_id 一致性 | `create` 与 `query` 必须同一个 device_id，否则 `-3503 当前设备或网络环境存在风险` | 换 id 复现两次 |
+| 扫码系 salt | DS2，`dDIQHbKOdaPaLuvQKVzUzqdeCaxjtaPV`，配 app_version `2.90.1`、client_type `3` | 实测可用 |
+| 换票系 salt | DS2，`JwYDpKvLj6MrMqqYU6jTKF17KNO2PXoS`，配 `2.95.1`、client_type `2`、sdk `2.16.0` | FufuLauncher `PassportClient` |
+| `stoken` 来源 | app 码 `confirmed` 响应里的 `data.tokens[].token`（`name=stoken`），配 `data.user_info.{mid,aid}` | FufuLauncher `LoginQrWindow.AppQrLogin` |
+| 签到 salt | DS1，`G1ktdwFL4IyGkHuuWSmz0wUe9Db9scyK`，配 `2.93.1`、client_type `5` | `Tools.GetDs(true)` |
+| `ltoken` 能否签到 | **不能**。配全套签到头仍是 `-100` | 11-12 复测（排除头部原因） |
+| 二维码有效期 | 约 5 分钟；`-3501`/`-106` = 过期 | 源码 + 实测 |
+
 ### 待填
 
 | 项目 | 值 | 备注 |
 |---|---|---|
-| cookie 必填字段 | | 哪些必须、哪些可省 |
-| `ltuid` / `stuid` 区别 | | |
-| `ltoken` / `stoken` 用途与有效期 | | |
-| `cookie_token` 获取方式 | | |
-| **2.117.0 的 salt** | ❓ 未找到，**但不阻塞** | 133 个公开值 + 7967 个从网页 bundle 挖出的候选，全部不匹配。已实测查询类接口不吃 DS，只在签到这类写接口上才需要——挖不到就先不挖 |
-| `device_id` 生成规则 | | 自己定的规则也要记 |
-| retcode 分类表 | | 限流 / 失效 / 验证 / 致命 |
+| ~~cookie 必填字段~~ | 查询用 `ltoken`+`ltuid`；签到用 `stuid`+`stoken`+`mid` | ✅ 11-12 |
+| `ltuid` / `stuid` 区别 | 都是账号 id（`aid`），不同接口不同叫法 | ✅ 11-12 |
+| ~~`ltoken` / `stoken` 用途~~ | 查询 / 社区与签到，见上表 | ✅ 11-12 |
+| ~~`cookie_token` 获取方式~~ | `GET …/account/auth/api/getCookieAccountInfoBySToken` | ✅ 11-12 |
+| **2.117.0 的 salt** | ❓ 未找到，**但不阻塞** | 133 个公开值 + 7967 个从网页 bundle 挖出的候选，全部不匹配。已实测查询类接口不吃 DS；签到用 `2.93.1` 那套即可 |
+| `device_id` 生成规则 | 扫码：16 位大写 hex + `md5(JSON)` 做 fp；签到：`md5(完整 cookie)` | ✅ 11-12 |
+| retcode 分类表 | `-100`/`10001` 未登录、`-10001` 签名、`-3501`/`-106` 二维码过期、`-3503` 风控、`-500004` 限流、`1034` 需验证 | 逐步补 |
 | 每日签到刷新时间 | | 以实测为准 |
 | 触发风控的阈值 | | 例如连续多少请求后被拒 |
 
@@ -499,9 +565,18 @@ pwsh -NoProfile -File .\scripts\smoke-agent.ps1
 Invoke-RestMethod "http://localhost:8080/chat?q=你好"
 Invoke-RestMethod "http://localhost:8080/agent?q=萝卜有哪些原神角色" | ConvertTo-Json -Depth 4
 
+# 扫码绑定米游社：终端 1 起服务，终端 2 跑脚本（会弹出二维码 PNG）
+pwsh -NoProfile -File .\scripts\login-qr.ps1
+
+# 只想拿建码结果（自己渲染二维码时用）
+(Invoke-RestMethod "http://localhost:8080/api/auth/qr" -Method Post).data
+
 # 部署时覆盖 .env 位置
 java -jar target\HoyoAgent-0.0.1-SNAPSHOT.jar "--spring.config.import=optional:file:./config/.env[.properties]"
 ```
+
+> 凭据优先级：`~/.hoyo/credential.properties`（扫码写入，带 stoken）**高于** `.env` 的 `HOYO_COOKIE`。
+> 想强制回到手填 cookie，把那个文件删掉即可。
 
 ---
 
@@ -537,3 +612,9 @@ java -jar target\HoyoAgent-0.0.1-SNAPSHOT.jar "--spring.config.import=optional:f
 12. **Mockito 的 `self-attaching` / `dynamic agent` 警告是噪音**：Mockito 5 的 inline mock maker 运行时挂 byte-buddy agent，JDK 21+ 会告警，与服务代码无关
 13. **删了源文件不等于删了类**：`mvn test` 不会清理 `target/classes` 里的旧 `.class`，Spring 组件扫描照样扫到它。2026-11-07 改名 `FakePlayerTool` → `PlayerTool` 后直接 `test`，报 `IllegalConfigurationException: Duplicated definition for tool: getPlayerCharacters`。**动过类名/包名/删过类，一律用 `clean test`**
 14. **"不调用工具"的用例可能是恒真的**：工具不存在时，模型当然不会调用它。测能力边界必须放诱饵（`DecoyTool`），否则通过与否都不含信息
+
+**维护记录**
+
+- 2026-11-12 清理：删除 `Signer`（DS 逻辑已由 `DsSigner` 统一）、`hoyo.salt` / `hoyo.role-id` / `hoyo.server`
+  三个死配置、Spring 初始化模板 `HELP.md`；修复 `ErrorCode` 里 `MOYO_SIGN_INVALID` 与 `MOYO_DATA_PRIVATE`
+  撞码（都是 `9006`，后者改为 `9007`）。角色 uid 改为自动发现后，`.env` 的 `HOYO_ROLE_ID`/`HOYO_SERVER` 已不读取。

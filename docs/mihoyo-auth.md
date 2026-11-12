@@ -1,8 +1,10 @@
 # 米游社账号接入与多用户绑定设计
 
-> 状态：**设计稿，尚未实现**。当前项目只支持单账号，cookie 手填在 `.env` 里。
-> 本文档锁定「多用户绑定 + 独立签到 + agent 记忆隔离」的目标形态与实施顺序，供 P7/P8 阶段接入。
+> 状态：**登录 + 单账号签到已落地并真机验证（2026-11-12）**。
+> A（扫码登录）、B（换票 + v2）、E 的单角色签到与幂等已通；E 的定时调度/通知未做。
+> 多用户绑定（C/D）仍是设计。当前项目只有一个账号（cookie 来自 `.env` 或扫码写入的文件）。
 > 参考实现：[FufuLauncher](https://github.com/FufuLauncher/FufuLauncher)（MIT，C#），本文只提取事实，不复制代码。
+> 事实核对基准：`master@e643627`（2026-11-12）。
 
 ---
 
@@ -45,13 +47,13 @@
 login_ticket（30 分钟，一次性）
       │  换
       ▼
-stoken + mid  ──────────────► 米游社内的操作：签到、活动、社区互动
+stoken + mid  ──────────────► 社区操作、genAuthKey、换 v2 凭据、游戏扫码确认
       │  换
       ▼
-ltoken + ltuid（ltoken_v2 / ltuid_v2）──► 查游戏战绩：角色、深淵、树脂
+ltoken + ltuid（ltoken_v2 / ltuid_v2）──► 查战绩：角色、深渊、树脂
       │
       ▼
-cookie_token + account_id ────► 部分接口的额外凭据（如 genAuthKey）
+cookie_token + account_id ────► 每日签到（luna）、部分接口的额外凭据
 ```
 
 ### 我们踩过的实证
@@ -59,10 +61,31 @@ cookie_token + account_id ────► 部分接口的额外凭据（如 genA
 | 请求 | 用的凭据 | 结果 |
 |---|---|---|
 | `GET /binding/api/getUserGameRolesByCookie` | ltoken | ✅ `retcode:0`，无需 DS |
-| `POST /game_record/.../character/list` | ltoken | ✅ `retcode:0`，无需 DS |
-| `GET /event/luna/hk4e/info`（签到） | ltoken | ❌ `-100 请登录后重试` |
+| `POST /game_record/.../character/list` | ltoken_v2 | ✅ `retcode:0`，无需 DS（11-07） |
+| `POST /game_record/.../character/list` | 只有 ltoken v1 | ❌ `5003`（无 message） |
+| `GET /event/luna/info`（签到，11-07） | ltoken | ❌ `-100 请登录后重试` |
+| `GET /event/luna/info`（签到，11-12） | ltoken + 完整签到头 | ❌ 仍 `-100` |
 
-**结论（待最终验证）**：查询类接口用 `ltoken` 就够；**签到需要 `stoken`**，而 `stoken` 只能通过登录流程获得——这正是我们现在的 cookie 里缺的那一块。
+**11-12 的对照实验**（同一账号、同一 uid `100848866`、同一套头，只改 cookie 字段）：
+
+| cookie 组合 | 结果 |
+|---|---|
+| `cookie_token` + `account_id` | ✅ `retcode:0` |
+| `stoken` + `mid` + `stuid` | ❌ `-100` |
+| `ltoken` + `ltuid` | ❌ `-100` |
+| `stoken`+`mid`+`stuid`+`ltoken`+`ltuid` | ❌ `-100` |
+| 完整 cookie | ✅ `retcode:0` |
+| `cookie_token` 单独 / `account_id` 单独 | ❌ `-100` |
+
+**结论（已确认，且推翻了原来的判断）**：
+
+- **游戏签到（luna）认的是 `cookie_token` + `account_id`，不是 `stoken`。** 两个缺一不可。
+- 11-07 那次 `-100` 的真实原因不是"缺 stoken"，而是：(a) 用的 uid 不属于当前 cookie 对应的账号，或
+  (b) `cookie_token` 已过期。**"uid 不属于当前账号"这个坑会伪装成"没登录"**，这次实际踩到了。
+- `stoken` 的用途是**米游社社区操作**（发帖、社区签到）、`genAuthKey`（抽卡链接）、以及**换 v2 凭据**；
+  它确实值钱，只是不负责游戏签到。
+- 战绩接口（`character/list`、`dailyNote`）只认 **v2**（`ltoken_v2` / `cookie_token_v2`）。
+  只有 v1 会返回无 message 的 `5003`——这个码极容易误判成"没权限"。
 
 UIGF 文档的描述与之吻合：
 
@@ -71,15 +94,25 @@ UIGF 文档的描述与之吻合：
 
 ---
 
-## 3. 三种登录方式
+## 3. 登录：两条扫码链路（别混）
 
-| 方式 | 端点 | 难点 | 风控强度 | 建议 |
+米游社有**两种二维码**，方向完全不同。FufuLauncher 两条都实现了，我们也需要两条，但优先级不同：
+
+| 链路 | 端点 | 谁扫谁 | 拿到什么 | 用途 |
 |---|---|---|---|---|
-| **扫码** | `passport-api.mihoyo.com/account/ma-cn-passport/web/createQRLogin` | 轮询状态机 | 低 | ✅ **首选** |
-| 手机验证码 | `.../ma-cn-verifier/verifier/createLoginCaptcha`<br>`.../ma-cn-passport/app/loginByMobileCaptcha` | 手机号要 RSA 加密；可能要 `X-Rpc-Aigis` 风控票 | 高 | 备选 |
-| 密码 | `loginByPassword` | 密码 RSA 加密 + 强风控 | 最高 | 不做 |
+| **App 登录码** | `.../ma-cn-passport/app/createQRLogin`<br>`.../ma-cn-passport/app/queryQRLoginStatus` | 我们显示、**手机米游社扫** | `data.tokens[].stoken` + `data.user_info.{mid,aid}` | ✅ 首次登录；**唯一能凭空拿到 stoken 的方式** |
+| **Web 确认码** | `.../ma-cn-passport/web/createQRLogin`<br>`.../ma-cn-passport/app/scanQRLogin`<br>`.../ma-cn-passport/app/confirmQRLogin`<br>`.../ma-cn-passport/web/queryQRLoginStatus` | 我们先建码，再用**已有 stoken 冒充手机**去 scan+confirm | 响应头 `Set-Cookie`：`ltoken_v2`/`cookie_token_v2`/`stuid` | 🔄 续期：stoken 没坏、其它票过期时，不用再找手机 |
 
-### 扫码登录时序
+> 本文早先把"用户扫码登录"写成 `web/createQRLogin`，那是把两条链路记混了：
+> **web 码自己扫不出 stoken**，它要么给浏览器用，要么就得像 FufuLauncher 那样拿已有 stoken 去冒充手机。
+> 真正"手机扫一下就登录"的是 **app 码**。
+
+| 其他方式 | 端点 | 难点 | 风控强度 | 建议 |
+|---|---|---|---|---|
+| 手机验证码 | `.../ma-cn-verifier/verifier/createLoginCaptcha`<br>`.../ma-cn-passport/app/loginByMobileCaptcha` | 手机号 RSA 加密；可能要 `X-Rpc-Aigis` 风控票 | 高 | 备选 |
+| 密码 | `loginByPassword` | 密码 RSA + 强风控 | 最高 | 不做 |
+
+### App 登录码时序（已实现）
 
 ```
 用户               你的服务                     米游社
@@ -92,34 +125,39 @@ UIGF 文档的描述与之吻合：
  │                    │                          │
  │  用米游社 App 扫码  │                          │
  │──────────────────────────────────────────────►│
- │                    │  queryQRLoginStatus(轮询) │
+ │                    │  app/queryQRLoginStatus   │
  │                    │─────────────────────────►│
- │                    │◄── status=Confirmed + cookies(stoken, mid)
+ │                    │◄── status=confirmed ─────│
+ │                    │    user_info{mid,aid}     │
+ │                    │    tokens[{name:stoken}]  │
  │                    │                          │
  │◄── 绑定成功 ────────│                          │
 ```
 
-关键点：
+关键点（都是实测踩出来的）：
 
-- **轮询间隔 2 秒**，二维码有效期约 5 分钟
-- 拿到的 cookie 里含 `stoken` + `mid`，这才是签到的入场券
-- 整个流程不需要用户输入密码，也不会触发短信风控
+- **device_id 必须全程一致**：`create` 和 `query` 用不同 device_id，轮询直接 `-3503 当前设备或网络环境存在风险`。
+  所以设备身份要持久化（`~/.hoyo/passport-device`），不是每次请求随机生成。
+- 二维码有效期约 5 分钟；`-3501` / `-106` = 已过期；轮询 2~3 秒一次足够，别调成 200ms。
+- `confirmed` 响应里**直接给 stoken**（`data.tokens[]`），不需要 `login_ticket` 再换——这是 app 码相对 web 码最大的好处。
+- `data.user_info` 同时给 `mid` 和 `aid`；`aid` 就是后面 cookie 里的 `stuid`/`ltuid`。
 
-### 请求头（passport 系）
+### 两套请求头（混用必失败）
 
-扫码和验证码登录都走 `passport-api.mihoyo.com`，需要一套固定头：
+扫码系和换票系是**两套独立配置**，salt 与 app_version 必须配对：
 
-```
-x-rpc-app_id:      bll8iq97cem8
-x-rpc-app_version: 2.95.0        （与 DS 的 salt 配对）
-x-rpc-client_type: 2
-x-rpc-device_id:   <每用户固定>
-x-rpc-game_biz:    bbs_cn
-x-rpc-sdk_version: 2.95.0
-DS:                Gen2（salt=JwYDpKvLj6MrMqqYU6jTKF17KNO2PXoS）
-```
+| 项 | 扫码系（create/query QR） | 换票系（getLToken / getCookieAccountInfo） |
+|---|---|---|
+| `x-rpc-client_type` | `3` | `2` |
+| `x-rpc-app_version` | `2.90.1` | `2.95.1` |
+| `x-rpc-sdk_version` | `2.90.1` | `2.16.0` |
+| `DS` | DS2，salt `dDIQHbKOdaPaLuvQKVzUzqdeCaxjtaPV` | DS2，salt `JwYDpKvLj6MrMqqYU6jTKF17KNO2PXoS` |
+| `x-rpc-device_id` | 16 位大写 hex（持久化） | 账号 UUID（可复用 `~/.hoyo/device-id`） |
+| 其他 | `x-rpc-device_fp`、`x-rpc-device_model: Mi 14`、`x-rpc-device_name`、`x-rpc-game_biz: bbs_cn`、`x-rpc-app_id: bll8iq97cem8` | `x-rpc-aigis`（可空）、`x-rpc-game_biz: bbs_cn`、`x-rpc-app_id` 同上 |
+| UA | `Mozilla/5.0 miHoYoBBS/2.90.1 Capture/2.2.0` | `Mozilla/5.0 (Windows NT 10.0; Win64; x64) miHoYoBBS/2.95.1` |
 
-注意 passport 用的是 **DS2**（带 `&b={body}&q={query}`），不是我们查战绩用的 DS1。
+注意 passport 用的是 **DS2**（带 `&b={body}&q={query}`），不是查战绩用的 DS1。
+`b` 必须和实际请求体**逐字节一致**（JSON 别多加空格），否则 `-10001`。
 
 ### stoken → ltoken 换取
 
@@ -131,21 +169,28 @@ GET https://passport-api.mihoyo.com/account/auth/api/getCookieAccountInfoBySToke
 Cookie: mid=<mid>; stoken=<stoken>; stuid=<uid>
 ```
 
-这两个接口不需要 DS，只需要 `stoken` + `mid`。
+- 返回 `data.ltoken` 和 `data.cookie_token`。
+- **需要 DS2**（salt `JwYDpKv…`、2.95.1）——早期笔记写的"不需要 DS"是错的。
+- 不需要 body；`stuid` 用 confirmed 里的 `aid`。
 
 ---
 
 ## 4. 分阶段实施计划
 
-| 阶段 | 内容 | 预估 | 验收 |
-|---|---|---|---|
-| **A** | 扫码登录拿到 `stoken` + `mid` | 1 天 | 两个值能打印出来，且用它们换到 ltoken |
-| **B** | `stoken` → `ltoken` / `cookie_token` | 半天 | 用换到的 ltoken 成功查角色列表 |
-| **C** | 多用户凭据存储（加密 + 按 userId 检索） | 1 天 | 两个账号的数据互不串 |
-| **D** | per-user 工具与记忆隔离 | 1 天 | 用户 A 问"我有哪些角色"，只返回 A 的 |
-| **E** | 签到调度（幂等 + 重试 + 通知） | 1 天 | 连续 3 天自动签到成功，不重复签 |
+| 阶段 | 内容 | 预估 | 验收 | 状态（11-12） |
+|---|---|---|---|---|
+| **A** | 扫码登录拿到 `stoken` + `mid` | 1 天 | 两个值能打印出来，且用它们换到 ltoken | ✅ 真机扫码通过（`WAITING→SCANNED→BOUND`） |
+| **B** | `stoken` → `ltoken` / `cookie_token` / `*_v2` | 半天 | 用换到的 ltoken 成功查角色列表 | ✅ 全部换到；战绩查询受账号侧 `5003` 限制（见 §12） |
+| **C** | 多用户凭据存储（加密 + 按 userId 检索） | 1 天 | 两个账号的数据互不串 | 未开始 |
+| **D** | per-user 工具与记忆隔离 | 1 天 | 用户 A 问"我有哪些角色"，只返回 A 的 | 未开始（依赖 P7 的 `ChatMemory`） |
+| **E** | 签到调度（幂等 + 重试 + 通知） | 1 天 | 连续 3 天自动签到成功，不重复签 | 🚧 单角色签到 + 幂等已通；**调度/通知未做** |
 
 **A 和 B 是硬前置**，C~E 可以并行。
+
+> A 的入口（已实现）：
+> `POST /api/auth/qr` → `GET /api/auth/qr/{ticket}/image`（PNG）→ `GET /api/auth/qr/{ticket}` 轮询。
+> 成功后写 `~/.hoyo/credential.properties`，启动时优先于 `.env`（因为它带 stoken）。
+> v2 续期不需要扫码：`POST /api/auth/refresh`。
 
 ---
 
@@ -320,6 +365,49 @@ ChatMemoryProvider chatMemoryProvider() {
 - 结果：写 `checkin_records`，并按用户汇总成一条消息推回平台
 - 并发：单账号串行，账号间可并发，上限 3（参考 FufuLauncher 的 `MaxConcurrentGames`）
 
+### 协议细节（从 FufuLauncher 抄下来的确定值）
+
+```http
+GET  {host}/event/luna/info?lang=zh-cn&act_id=..&region=cn_gf01&uid=153383881
+POST {host}/event/luna/sign   {"act_id":"..","region":"cn_gf01","uid":"153383881"}
+GET  {host}/event/luna/home?lang=zh-cn&act_id=..     ← 奖励名（可选，用于汇报）
+```
+
+| 项 | 值 | 备注 |
+|---|---|---|
+| host | `https://api-takumi.mihoyo.com` | 绝区零用 `https://act-nap-api.mihoyo.com/event/luna/zzz` |
+| cookie | **完整 cookie**（关键是 `cookie_token` + `account_id`） | `stoken`/`ltoken` 单独都不行；实测见 §2 |
+| 必需字段 | `cookie_token` **且** `account_id` | 缺一即 `-100` |
+| DS | DS1，salt `G1ktdwFL4IyGkHuuWSmz0wUe9Db9scyK` | 注意这个 salt 在 FufuLauncher 里叫 `WebMihoyo` |
+| `x-rpc-app_version` | `2.93.1` | 与上面 salt 配对 |
+| `x-rpc-client_type` | `5` | |
+| `x-rpc-channel` | `miyousheluodi` | 缺了会被风控 |
+| `x-rpc-signgame` | `hk4e`（原神）/ `zzz`（绝区零）；星铁不传 | |
+| `Referer` / `Origin` | `https://act.mihoyo.com/` | 崩坏3/2 用 webstatic 的签到页 |
+| `x-rpc-device_id` | `md5(完整 cookie)` | FufuLauncher 的取巧：设备 id 跟着 cookie 走 |
+
+各游戏 `act_id`（FufuLauncher 里是常量，不是"每期变"）：
+
+| 游戏 | game_biz | act_id |
+|---|---|---|
+| 原神 | `hk4e_cn` | `e202311201442471` |
+| 星穹铁道 | `hkrpg_cn` | `e202304121516551` |
+| 绝区零 | `nap_cn` | `e202406242138391` |
+| 崩坏3 | `bh3_cn` | `e202306201626331` |
+
+其他判定：`first_bind=true` 表示还没在 App 里绑定该角色，**不能签**，要提示用户先去米游社绑定；
+`sign` 返回 0 但 `data.success != 0` 是触发验证码（风控），不是成功。
+
+### 11-12 实测结果（本轮代码）
+
+| 游戏 | 结果 | 奖励 | 累计天数 |
+|---|---|---|---|
+| 原神 `100848866` | 手动签过一次后，代码返回 `ALREADY` | 「甜甜花酿鸡」x3 | 5 |
+| 星铁 `103871907` | 代码 `SIGNED` | 「星琼」x20 | 5 |
+| 绝区零 `15911914` | 代码 `SIGNED` | 「菲林」x20 | 5 |
+
+幂等已验证：同一天再调 `POST /api/checkin` 只返回"已签"，不会重复签。
+
 ---
 
 ## 9. 风险与合规
@@ -338,35 +426,94 @@ ChatMemoryProvider chatMemoryProvider() {
 |---|---|
 | `Services/MiHoYo/Passport/PassportClient.cs` | 验证码登录、`stoken → ltoken` 换取、passport 头与 DS2 |
 | `Services/MiHoYo/Passport/PassportRsaCrypto.cs` | 手机号的 RSA 加密方式 |
-| `Services/Qr/MiyousheQrLoginService.cs` | 扫码登录时序、`stoken`/`mid` 的提取、二维码票据流转 |
+| `Views/Windows/LoginQrWindow.AppQrLogin.cs` | **真正能拿到 stoken 的扫码登录**：建码 + 轮询 + 提取 `tokens[].stoken` |
+| `Views/Windows/LoginQrWindow.V2Exchange.cs` | 换 `ltoken`/`cookie_token`，再用 web 码冒充手机刷出 `*_v2` |
+| `Views/Windows/LoginQrWindow.xaml.cs` | `AddCommonHeaders`：扫码系头的完整清单与 DS 生成 |
 | `Services/Account/TokenRefreshService.cs` | token 过期后的刷新策略（19KB，最值得读） |
 | `Services/Account/AccountManager.Cookies.cs` | cookie 的组装、校验与迁移 |
 | `Services/Checkin/MiyousheGameCheckinService.cs` | 签到主流程、幂等、限流、重试 |
 | `Models/Checkin/MiyousheCheckinGame.cs` | 各游戏 `act_id` 与 host 常量 |
+| `Models/MihoyoBBS/Tools.cs` | 签到用的 DS1（salt `G1ktdw…`）与 `md5(cookie)` 设备 id |
+| `Services/Qr/MiyousheQrLoginService.cs` | ⚠️ 不是登录码：它是**游戏登录二维码**的确认流程（拿的是游戏 token） |
 | `Constants/MiHoYo/HeaderSalts.cs` | 各场景 salt（**与 app_version 配对**，不能混用） |
 | `Constants/ApiEndpoints.cs` | 全部端点清单，可作为接口索引 |
 
-**注意**：它固定 `x-rpc-app_version = 2.93.1` 并配对应 salt。我们实测该组合在我们这打 `luna/info` 仍返回 `-100`——因为缺 `stoken`，不是版本问题。
+**注意**：签到路径固定 `x-rpc-app_version = 2.93.1` + DS1 salt `G1ktdwFL4IyGkHuuWSmz0wUe9Db9scyK`。
+11-12 第一次用这套头 + ltoken 打 `luna/info` 得到 `-100`，当时的结论"因为缺 stoken"是**错的**——
+真正原因是 uid 不属于当前账号 + `cookie_token` 过期。§2 的对照实验已经修正。
 
 ---
 
-## 11. 现在就能做的准备（不写登录也能做）
+## 11. 历史：登录前就能做的准备（已完成）
 
-这三件事不依赖登录流程，做完能省后面半天：
+这三件事在 P6/P9 之间已经落地，留在这里只为解释当前结构为什么长这样：
 
-1. **把 `GameRole` 模型和 `getUserGameRolesByCookie` 接上**（已实测可用、无需 DS）
-2. **工具签名改成 `@ToolMemoryId`**，先用一个固定的 `userId` 顶上，等登录做完再换成真实映射
-3. **`CredentialCipher` 接口先定义**，实现可以先放一个"明文直通"的假实现，加密留到真正存 token 时再补
+1. **`GameRole` + `getUserGameRolesByCookie`** → 现在由 `GameRoleService` 自动发现角色，
+   彻底替掉了 `HOYO_ROLE_ID`（写死 uid 在换账号后会指向别人的号）。
+2. **工具签名无身份参数** → `PlayerTool` / `CheckinTool` 都是零参数，
+   身份来自 cookie；多用户时再换成 `@ToolMemoryId` 注入。
+3. **凭据存储** → 现在用 `CredentialStore`（明文、owner-only）落到
+   `~/.hoyo/credential.properties`；`CredentialCipher` 加密留到 C 阶段多用户时再做。
 
-这样做的好处：等登录流程做完，你只需要把 `stoken` 塞进已有的 `MiyousheAccount`，而不是重构一遍。
+---
+
+## 12. 实施记录（2026-11-12，登录 + 签到落地）
+
+### 新增代码
+
+| 文件 | 职责 |
+|---|---|
+| `mihoyo/sign/DsSigner.java` | DS1（`t,r,md5`）与 DS2（带 `b`/`q`）；旧的 `Signer` 已删除，统一入口 |
+| `mihoyo/auth/passport/PassportDevice.java` | 持久化 16 位 hex `device_id` + `device_fp`（`~/.hoyo/passport-device`） |
+| `mihoyo/auth/passport/PassportClient.java` | 建码 / 轮询 / 换 ltoken / 换 cookie_token / **v2 换取**；两套头各自封装 |
+| `mihoyo/auth/QrLoginService.java` | 状态机 `WAITING→SCANNED→BOUND`，换票只做一次，3 分钟过期；`refreshV2()` 静默续期 |
+| `mihoyo/auth/CredentialStore.java` | 写 `~/.hoyo/credential.properties`（明文，owner-only） |
+| `mihoyo/auth/CredentialProvider.java` | 启动优先级：**带 stoken 的文件 > `.env`** |
+| `mihoyo/dto/GameRole.java` + `mihoyo/role/GameRoleService.java` | 角色自动发现（10 分钟缓存），**替代写死的 `HOYO_ROLE_ID`** |
+| `mihoyo/checkin/MiyousheCheckinGame.java` | 各游戏 `act_id` / host / `signgame` |
+| `mihoyo/checkin/LunaClient.java` | `info` / `sign` / `home`，签到头 + DS1 |
+| `mihoyo/checkin/CheckinService.java` | `info → sign → info` 复验、`first_bind`、验证码、retcode 翻译 |
+| `agent/tool/CheckinTool.java` | Agent 工具：`checkinToday()`（无身份参数） |
+| `adapter/http/AuthController.java` | 建码 / 轮询 / PNG / `GET /api/auth/roles` / `POST /api/auth/refresh` |
+| `adapter/http/CheckinController.java` | `POST /api/checkin`（手动触发） |
+| `scripts/login-qr.ps1` | 一条命令走完：建码 → 存 PNG → 轮询到 BOUND |
+
+### 已实测通过（本机，2026-11-12）
+
+| 验证项 | 结果 |
+|---|---|
+| `POST app/createQRLogin`（扫码系头 + DS2） | `retcode=0`，返回 `ticket` + `login-platform` url |
+| `POST app/queryQRLoginStatus` | `retcode=0`；真机扫码后 `WAITING→SCANNED→BOUND` |
+| 换成另一个 `device_id` 再轮询 | `-3503 当前设备或网络环境存在风险`（所以必须持久化） |
+| 真机扫码拿到 stoken/ltoken/cookie_token | ✅（uid `75708228`，mid `***_mhy`） |
+| `POST /api/auth/refresh`（v2 换取） | ✅ 拿到 `ltoken_v2` + `cookie_token_v2` |
+| 角色自动发现 | ✅ 7 个角色（原神/星铁/绝区零/崩坏3×4） |
+| `POST /api/checkin` | ✅ 星铁、绝区零真签成功；原神当日已签返回 `ALREADY` |
+| 幂等 | ✅ 同日重复调用不重复签 |
+| 单元测试（13 条）+ `PassportClientTest`（2 条）+ `LunaClientTest`（2 条） | 全绿 |
+
+### 已知问题（不是代码 bug，但要知道）
+
+1. **`character/list` 仍返回 `5003`**（新账号，v2 凭据齐全，换过 device_fp / DS / web 头都不变）。
+   同一请求在旧账号上是通的，所以更可能是**账号侧的战绩可见性/风控**，不是请求构造问题。
+   代码里已经能把它当普通 `MOYO_API_ERROR` 返回给模型，不会崩。
+2. `5003` 没有 message，极难自行诊断。如果换账号也不通，下一步应该抓一次官方 App 的同请求对比头。
+3. **旧 `.env` 的 `HOYO_ROLE_ID=153383881` 属于另一个账号**，现在已不参与查询（改自动发现）。
+
+### 下一步
+
+- P9-8：`@Scheduled` 每天 00:10 + 当日记录（先内存/文件，多用户再上 `checkin_records`）
+- P9-9：stoken 失效时主动提示重新扫码（`/api/auth/refresh` 失败 → 发通知）
+- 排查 `5003`：等风控冷却后用旧账号复测；若旧账号也变 5003，就是接口升级，需要抓包
 
 ---
 
 ## 附：待验证清单
 
-- [ ] 扫码登录拿到的 cookie 是否直接包含 `stoken` + `mid`
+- [x] 扫码登录拿到的 cookie 是否直接包含 `stoken` + `mid` —— **app 码的 `confirmed` 响应直接给**（`tokens[]` + `user_info`），不用 login_ticket 换
+- [x] `luna/info` 带上 `stoken` 后是否返回 `retcode:0` —— **问法本身错了**：签到认 `cookie_token`+`account_id`，不看 stoken（见 §2 对照实验）
+- [x] `first_bind` 为 true 时的正确交互 —— 不签，提示先去 App 绑定
 - [ ] `stoken` 有效期（文档说"改密码后失效"，但没说自然过期时间）
-- [ ] `luna/info` 带上 `stoken` 后是否返回 `retcode:0`
-- [ ] `first_bind` 为 true 时的正确交互
 - [ ] 签到风控触发后的冷却时间
-- [ ] 多账号是否共享 `device_id`（理论上应各自独立）
+- [ ] `5003` 的确切含义（战绩接口只给 retcode、不给 message）
+- [ ] 多账号是否共享 `device_id`（FufuLauncher 每个账号一套 cookie，签到设备 id 取 `md5(cookie)`，天然各自独立）
