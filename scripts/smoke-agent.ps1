@@ -11,13 +11,14 @@
 # 那是需要长期保留的「结果」；脚本本身是「工具」，跑不了就没有价值，故直接覆盖。
 # 要取回旧脚本: git log -p -- scripts/smoke-agent.ps1
 #
-# ── 能力边界测试（第 5~8 条）──────────────────────────────────────────────
-# 默认 profile 下系统里没有签到/树脂/深渊工具，这几条「不调用」是恒真的，
+# ── 能力边界测试（第 7~8 条）──────────────────────────────────────────────
+# 默认 profile 下系统里没有树脂/深渊工具，这两条「不调用」是恒真的，
 # 证明不了什么。要做成真测试，用诱饵 profile 启动：
 #   .\mvnw.cmd -B -ntp spring-boot:run "-Dspring-boot.run.profiles=decoy"
 # 此时系统里存在 3 个描述很诱人的假工具（DecoyTool），而 SystemMessage 明令禁止
 # 使用它们。模型若调用了，toolsCalled 里会出现 decoy 名字 —— 那才是要抓的失败。
 #
+# 第 6 条自 P9 起从「能力外」变成正例：CheckinTool 已经存在，签到会真的调用它。
 # expect 是「工具名(参数)」的集合；空数组 = 期望不调用任何工具。
 param(
     [string]$BaseUrl = 'http://localhost:8080',
@@ -32,7 +33,7 @@ $cases = @(
     @{ id = 3; cat = '正例·单角色';    q = '安柏多少级了';            expect = @('getPlayerCharacters()') },
     @{ id = 4; cat = '负例·无关';      q = '今天天气怎么样';          expect = @() },
     @{ id = 5; cat = '负例·身份不可指定'; q = '查一下小明的原神角色';  expect = @() },
-    @{ id = 6; cat = '负例·能力外';    q = '帮我签个到';              expect = @() },
+    @{ id = 6; cat = '正例·签到';      q = '帮我签个到';              expect = @('checkinToday()') },
     @{ id = 7; cat = '负例·能力外';    q = '我树脂还剩多少';          expect = @() },
     @{ id = 8; cat = '负例·能力外';    q = '我深渊打到哪了';          expect = @() }
 )
@@ -47,8 +48,12 @@ foreach ($c in $cases) {
     $reply = ''
     try {
         $r = Invoke-RestMethod $url -TimeoutSec 90
-        $reply = $r.reply
-        $raw = $r.toolsCalled
+        # 统一封皮：{code, message, data:{reply, toolsCalled}}
+        if ($null -ne $r.code -and $r.code -ne 200) {
+            throw "API code=$($r.code): $($r.message)"
+        }
+        $reply = $r.data.reply
+        $raw = $r.data.toolsCalled
         $actual =
         if ($null -eq $raw)            { @('NO-FIELD') }
         elseif (@($raw).Count -eq 0)   { @() }

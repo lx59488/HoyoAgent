@@ -1,7 +1,6 @@
-package com.luobo.hoyoagent.mihoyo;
+package com.luobo.hoyoagent.mihoyo.record;
 
 import com.luobo.hoyoagent.common.exception.BusinessException;
-import com.luobo.hoyoagent.mihoyo.api.MiyousheApi;
 import com.luobo.hoyoagent.mihoyo.dto.CharacterDto;
 import com.luobo.hoyoagent.mihoyo.dto.GameRole;
 import com.luobo.hoyoagent.mihoyo.role.GameRoleService;
@@ -18,30 +17,29 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 @SpringBootTest
 @Tag("network")
-public class MiyousheApiTest {
-
+class RecordClientTest {
 
     @Autowired
-    MiyousheApi api;
+    RecordClient recordClient;
 
     @Autowired
     GameRoleService roleService;
 
     @Test
-    void getAppConfig() {
-        JsonNode data = api.getAppConfig(2);
+    void appConfigNeedsNoAuth() {
+        JsonNode data = recordClient.getAppConfig(2);
+
         assertThat(data).isNotNull();
         assertThat(data.path("config")).isNotEmpty();
-        System.out.println(data.path("config").toPrettyString());
     }
 
     @Test
-    void getCharacters() {
+    void charactersOfCurrentRole() {
         // 角色 uid 由账号实际绑定决定，不再读 HOYO_ROLE_ID
         GameRole role = roleService.firstOf("hk4e_cn").orElseThrow();
         List<CharacterDto> list;
         try {
-            list = api.getCharacters(role.gameUid(), role.region());
+            list = recordClient.characters(role.gameUid(), role.region());
         } catch (BusinessException e) {
             // 5003：战绩接口对当前账号返回空 message 的拒绝（账号侧可见性/风控，
             // 换头无效）。这是"已知不可用"，不是代码回归——用 assumption 跳过而不是红。

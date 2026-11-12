@@ -23,8 +23,7 @@ class MihoyoHttpTest {
     @BeforeEach
     void setUp() {
         server = new MockWebServer();
-        HoyoProperties props = new HoyoProperties(Map.of(), "2.117.0", "5", "ua", "ref",
-                Duration.ofSeconds(5), null);
+        HoyoProperties props = new HoyoProperties(Map.of(), Duration.ofSeconds(5), null);
         http = new MihoyoHttp(props, new ObjectMapper());
     }
 

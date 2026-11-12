@@ -398,6 +398,9 @@ GET  {host}/event/luna/home?lang=zh-cn&act_id=..     ← 奖励名（可选，�
 其他判定：`first_bind=true` 表示还没在 App 里绑定该角色，**不能签**，要提示用户先去米游社绑定；
 `sign` 返回 0 但 `data.success != 0` 是触发验证码（风控），不是成功。
 
+> 实现坑：已签到的账号返回里 `first_bind` 可能是 **null**（不是 false）。用原始 `boolean` 接会
+> 反序列化失败，必须用 `Boolean` 包装类型（`LunaInfo.isFirstBind()` 内部做 `Boolean.TRUE.equals`）。
+
 ### 11-12 实测结果（本轮代码）
 
 | 游戏 | 结果 | 奖励 | 累计天数 |

@@ -72,11 +72,11 @@ public class CheckinService {
     private RoleResult checkinOne(CheckinGame game, GameRole role) {
         MihoyoResult result = luna.info(game, role.region(), role.gameUid());
         if (!result.ok()) {
-            return fail(game, role, result.message(), 0);
+            return fail(game, role, result.error().userMessage(), 0);
         }
         LunaInfo info = mapper.treeToValue(result.data(), LunaInfo.class);
 
-        if (info.firstBind()) {
+        if (info.isFirstBind()) {
             return new RoleResult(game.gameBiz(), game.displayName(), role.gameUid(), role.region(),
                     "FIRST_BIND", "还没在米游社绑定这个角色，先去 App 里绑定再签", 0, "");
         }

@@ -1,7 +1,7 @@
 package com.luobo.hoyoagent.mihoyo.role;
 
-import com.luobo.hoyoagent.mihoyo.api.MiyousheApi;
 import com.luobo.hoyoagent.mihoyo.dto.GameRole;
+import com.luobo.hoyoagent.mihoyo.record.RecordClient;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -25,21 +25,21 @@ public class GameRoleService {
 
     private static final Duration TTL = Duration.ofMinutes(10);
 
-    private final MiyousheApi api;
+    private final RecordClient recordClient;
 
     private volatile List<GameRole> cached = List.of();
 
     private volatile Instant loadedAt = Instant.EPOCH;
 
-    public GameRoleService(MiyousheApi api) {
-        this.api = api;
+    public GameRoleService(RecordClient recordClient) {
+        this.recordClient = recordClient;
     }
 
     public List<GameRole> roles() {
         if (Instant.now().isBefore(loadedAt.plus(TTL))) {
             return cached;
         }
-        List<GameRole> fresh = api.getGameRoles();
+        List<GameRole> fresh = recordClient.roles();
         cached = List.copyOf(fresh);
         loadedAt = Instant.now();
         log.info("已加载绑定角色 {} 个: {}", cached.size(),

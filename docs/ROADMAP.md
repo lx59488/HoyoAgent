@@ -52,31 +52,33 @@ com.luobo.hoyoagent
 │       ├── PlayerTool.java            ← P6：真数据；角色 uid 改为自动发现（P9）
 │       ├── CheckinTool.java           ← P9：每日签到（无身份参数）
 │       └── DecoyTool.java             ← @Profile("decoy") 诱饵，只用于测能力边界
-└── mihoyo/                            ← P4：外部系统客户端（与 agent 完全解耦）
-    ├── api/MiyousheApi.java           ← 业务接口：路径 + 参数 → JsonNode
-    ├── client/MihoyoHttpClient.java   ← OkHttp 单例 + 统一 header + retcode 检查
-    ├── client/DeviceIdProvider.java   ← 持久化 device_id（配置 > ~/.hoyo/device-id > 生成）
-    ├── auth/Credential.java           ← 含 stoken；toString 不泄露
-    ├── auth/CookieParser.java         ← 解析 stoken / mid / ltuid
-    ├── auth/CredentialProvider.java   ← 优先级：带 stoken 的文件 > .env
-    ├── auth/CredentialStore.java      ← ~/.hoyo/credential.properties（明文，owner-only）
-    ├── auth/QrLoginService.java       ← P9：WAITING→SCANNED→BOUND 状态机 + refreshV2
-    ├── auth/passport/PassportDevice.java ← 持久化扫码 device_id + device_fp
-    ├── auth/passport/PassportClient.java ← 两套头：扫码系 / 换票系；含 v2 换取
-    ├── checkin/MiyousheCheckinGame.java ← act_id / host / signgame 常量
-    ├── checkin/LunaClient.java        ← info / sign / home（签到头 + DS1）
-    ├── checkin/CheckinService.java    ← info→sign→info 复验、幂等、错误翻译
+└── mihoyo/                            ← 外部系统客户端（与 agent 完全解耦）
+    ├── transport/                     ← 唯一 HTTP 管道（P9 重构）
+    │   ├── MihoyoHttp.java            ← 无状态：retcode / headers 都返回，不抛业务异常
+    │   ├── MihoyoRequest.java         ← 不可变请求（null 集合自动规整为空）
+    │   ├── MihoyoResult.java          ← record(retcode, message, data, headers)
+    │   ├── HeaderProfile.java         ← 一套头 = 一个值（salt 与版本锁在一起）
+    │   └── Profiles.java              ← 扫码 / 换票 / 签到 / 战绩 四套头
+    ├── error/MihoyoError.java         ← retcode 唯一映射：kind + 中文文案 + ErrorCode
+    ├── credential/                    ← CookieJar / Credential / Store / Provider
+    ├── auth/                          ← QrLoginService + passport/{PassportClient,PassportDevice}
+    ├── record/RecordClient.java       ← 绑定角色 / 角色列表 / App 配置
+    ├── checkin/                       ← CheckinGame / LunaClient / CheckinService
+    ├── player/PlayerService.java      ← 角色发现 + 战绩查询的组合（工具层只负责措辞）
     ├── role/GameRoleService.java      ← 角色自动发现（10 分钟缓存）
+    ├── client/DeviceIdProvider.java   ← 持久化 device_id（配置 > ~/.hoyo/device-id > 生成）
     ├── dto/GameRole.java              ← 绑定角色
     ├── dto/CharacterDto.java          ← ⚠️ 用 Jackson 2 注解，见附录 C 坑 3
-    ├── enums/MiyousheHost.java        ← BBS / RECORD / TAKUMI 三个 host
+    ├── enums/{MiyousheHost,GameBiz}   ← host 与 game_biz 常量
     ├── MihoyoEndpoints.java           ← host 覆盖入口（hoyo.hosts 可改 base url）
     ├── sign/DsSigner.java             ← DS1 / DS2 公式与 md5（唯一签名入口）
     └── config/HoyoProperties.java     ← @ConfigurationProperties(prefix = "hoyo")
 
 src/test/java/...
-├── mihoyo/MiyousheApiTest.java        ← @Tag("network")，真实打米游社
-├── mihoyo/sign/DsSignerTest.java      ← 锁 DS 公式（用外部算出的 md5 向量）
+├── mihoyo/record/RecordClientTest.java    ← @Tag("network")，真实打米游社
+├── mihoyo/transport/MihoyoHttpTest.java   ← MockWebServer：retcode/header/POST 语义
+├── mihoyo/transport/MihoyoRequestTest.java← 空集合规整
+├── mihoyo/sign/DsSignerTest.java          ← 锁 DS 公式（用外部算出的 md5 向量）
 ├── mihoyo/auth/CookieParserTest.java
 └── mihoyo/auth/passport/PassportDeviceTest.java / PassportClientTest.java
 
@@ -89,8 +91,8 @@ docs/ROADMAP.md                        ← 本文件
 docs/mihoyo-auth.md                    ← 登录/多用户设计稿；A/B 已落地（P9）
 ```
 
-接口：`GET /chat?q=`（纯问答）、`GET /agent?q=`（带工具，返回 `{ok, reply, toolsCalled}`）、
-`POST /api/auth/qr` + `GET /api/auth/qr/{ticket}`（扫码绑定）
+接口：`GET /chat?q=`（纯问答）、`GET /agent?q=`（带工具，返回 `{code, message, data:{reply, toolsCalled}}`）、
+`POST /api/auth/qr` + `GET /api/auth/qr/{ticket}`（扫码绑定）、`POST /api/checkin`（手动签到）
 
 **结构决策**：原计划放 `adapter.mihoyo`，实际改为顶层 `mihoyo/`。原因是后续会有多个入站适配器（http / onebot / console），把「外部系统客户端」提到顶层更好表达边界。约定：**`adapter` 只表示入站，`mihoyo` 表示出站**。
 
@@ -296,6 +298,7 @@ P6 接真数据时才发现一个当初没意识到的事：**假数据把「查
   **P9 已删除**（查询接口实测不吃 DS），统一到 `DsSigner`
 - [x] P4-5 `DeviceIdProvider`：优先级「配置 `hoyo.device-id` > `~/.hoyo/device-id` > 生成 UUID」，原子写入，日志不打印值
 - [x] P4-6 `MihoyoHttpClient`：OkHttp 单例、统一 header、HTTP 状态检查、retcode 检查、异常映射到 9xxx
+  —— **2026-11-12 重构**：并入 `transport/MihoyoHttp`，retcode 语义移到 `MihoyoError`
 - [x] P4-8 第一个只读接口：`GET /apihub/wapi/getAppConfig?gids=2` → `retcode=0`，拿到完整 `config`（60+ key）
 - [x] P4-12 `log-requests` / `log-responses` 已为 `false`，`dev.langchain4j` 已降到 `WARN`
 
@@ -311,7 +314,7 @@ P6 接真数据时才发现一个当初没意识到的事：**假数据把「查
 - [ ] P4-9 retcode 映射表补全：现有 5 条（-100/10001/-5003/10101/1034）**全是假设**，必须实测
 - [ ] P4-10 三种错误场景各验证一次：错 cookie、过期 cookie、断网
 - [ ] P4-11 离线单测：`Signer` 固定输入 → 固定输出；`CookieParser` 各种脏输入
-- [ ] **P4-13 `CharacterDto` 的字段映射从未验证过**：`MiyousheApiTest` 只打印了 `name` 和 `level`，`actived_constellation_num` → `constellation` 这条没人看过。而小号角色命座全是 0，测了也分不出"映射成功"和"没映射上"。做法：录一份真实响应存 `src/test/resources/fixtures/`，写离线断言——顺手就把 P8 的回放测试开了头
+- [ ] **P4-13 `CharacterDto` 的字段映射从未验证过**：`RecordClientTest` 只打印了 `name` 和 `level`，`actived_constellation_num` → `constellation` 这条没人看过。而小号角色命座全是 0，测了也分不出"映射成功"和"没映射上"。做法：录一份真实响应存 `src/test/resources/fixtures/`，写离线断言——顺手就把 P8 的回放测试开了头
 
 ### 已修复
 
@@ -618,3 +621,15 @@ java -jar target\HoyoAgent-0.0.1-SNAPSHOT.jar "--spring.config.import=optional:f
 - 2026-11-12 清理：删除 `Signer`（DS 逻辑已由 `DsSigner` 统一）、`hoyo.salt` / `hoyo.role-id` / `hoyo.server`
   三个死配置、Spring 初始化模板 `HELP.md`；修复 `ErrorCode` 里 `MOYO_SIGN_INVALID` 与 `MOYO_DATA_PRIVATE`
   撞码（都是 `9006`，后者改为 `9007`）。角色 uid 改为自动发现后，`.env` 的 `HOYO_ROLE_ID`/`HOYO_SERVER` 已不读取。
+- 2026-11-12 修复（冒烟抓出来的两个真问题）：
+  1) `MihoyoAssistant` 的 `SystemMessage` 仍写着"没有签到能力"，导致用户说「帮我签个到」时模型
+     直接拒绝；能力清单已改为「角色列表 + 每日签到」两项，冒烟第 6 条从负例改成正例。
+  2) `LunaInfo.first_bind` 在已签到账号上是 `null`，原来用原始 `boolean` 接会反序列化失败
+     （模型报"字段 first_bind 为 null"并重复调用工具）；改成 `Boolean` + `isFirstBind()`，
+     并加 `LunaInfoTest` 锁住 null / missing / true 三种形态。
+  冒烟结果：8/8（默认 profile，`scripts/smoke-agent.ps1`）。
+- 2026-11-12 重构（Step 6/7）：`RecordClient` 接上身份并复用 `MihoyoHttp`；删除
+  `MiyousheApi` 与 `MihoyoHttpClient`（`new OkHttpClient` 从 3 处降到 2 处）；新增
+  `PlayerService` 把「角色发现 + 战绩查询」从工具层挪到服务层；`/agent`、`/chat` 统一为
+  `Result<T>` 封皮（冒烟脚本同步改动）；`HoyoProperties` 只留 `hosts/timeout/deviceId`，
+  UA/版本/盐交给 `Profiles`。

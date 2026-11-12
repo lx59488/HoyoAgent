@@ -37,12 +37,12 @@ public class Profiles {
                     "X-Requested-With", "com.mihoyo.hyperion"));
 
 
+    /** 战绩查询：沿用旧客户端的 2.117.0 + webstatic，不在此刻改版本（5003 尚未查清） */
     public static final HeaderProfile RECORD = new HeaderProfile(
-            "5", "2.93.1",
-            "Mozilla/5.0 (Linux; Android 12; Unspecified Device) AppleWebKit/537.36 (KHTML, like Gecko) "
-                    + "Version/4.0 Chrome/103.0.5060.129 Mobile Safari/537.36 miHoYoBBS/2.93.1",
-            "https://act.mihoyo.com/",
+            "5", "2.117.0",
+            "Mozilla/5.0 (Linux; Android 12; V2366GA Build/V417IR; wv) AppleWebKit/537.36 (KHTML, like Gecko) "
+                    + "Version/4.0 Chrome/110.0.5481.154 Mobile Safari/537.36 miHoYoBBS/2.117.0",
+            null,
             HeaderProfile.DsMode.NONE, "",
-            Map.of()
-    );
+            Map.of("Referer", "https://webstatic.mihoyo.com/"));
 }
