@@ -3,7 +3,7 @@ package com.luobo.hoyoagent.mihoyo.client;
 import com.luobo.hoyoagent.common.exception.BusinessException;
 import com.luobo.hoyoagent.common.exception.ErrorCode;
 import com.luobo.hoyoagent.mihoyo.MihoyoEndpoints;
-import com.luobo.hoyoagent.mihoyo.auth.CredentialProvider;
+import com.luobo.hoyoagent.mihoyo.credential.CredentialProvider;
 import com.luobo.hoyoagent.mihoyo.enums.MiyousheHost;
 import com.luobo.hoyoagent.mihoyo.config.HoyoProperties;
 import okhttp3.*;

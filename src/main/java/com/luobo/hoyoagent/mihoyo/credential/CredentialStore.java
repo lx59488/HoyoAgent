@@ -1,5 +1,6 @@
-package com.luobo.hoyoagent.mihoyo.auth;
+package com.luobo.hoyoagent.mihoyo.credential;
 
+import com.luobo.hoyoagent.mihoyo.auth.CookieParser;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
@@ -52,7 +53,7 @@ public class CredentialStore {
             }
             Credential parsed = CookieParser.parse(cookie);
             return Optional.of(new Credential(
-                    cookie,
+                    parsed.cookies(),
                     kv.getOrDefault("uid", parsed.uid()),
                     kv.getOrDefault("mid", parsed.mid()),
                     kv.getOrDefault("stoken", parsed.stoken())));

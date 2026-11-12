@@ -1,15 +1,17 @@
 package com.luobo.hoyoagent.mihoyo.checkin;
 
 import com.luobo.hoyoagent.common.exception.BusinessException;
+import com.luobo.hoyoagent.mihoyo.checkin.dto.LunaInfo;
 import com.luobo.hoyoagent.mihoyo.dto.GameRole;
 import com.luobo.hoyoagent.mihoyo.role.GameRoleService;
+import com.luobo.hoyoagent.mihoyo.transport.MihoyoResult;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
+import tools.jackson.databind.ObjectMapper;
 
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Optional;
 
 /**
  * 米游社每日签到。
@@ -32,9 +34,12 @@ public class CheckinService {
 
     private final LunaClient luna;
 
-    public CheckinService(GameRoleService roleService, LunaClient luna) {
+    private final ObjectMapper mapper;
+
+    public CheckinService(GameRoleService roleService, LunaClient luna, ObjectMapper mapper) {
         this.roleService = roleService;
         this.luna = luna;
+        this.mapper = mapper;
     }
 
     public Summary checkinAll() {
@@ -46,7 +51,7 @@ public class CheckinService {
         }
 
         List<GameRole> supported = roles.stream()
-                .filter(r -> MiyousheCheckinGame.of(r.gameBiz()).isPresent())
+                .filter(r -> CheckinGame.of(r.gameBiz()).isPresent())
                 .toList();
         if (supported.isEmpty()) {
             return new Summary(List.of(), "当前账号没有可签到的角色（原神/星铁/绝区零）");
@@ -55,7 +60,7 @@ public class CheckinService {
         List<RoleResult> results = new ArrayList<>();
         for (int i = 0; i < supported.size(); i++) {
             GameRole role = supported.get(i);
-            MiyousheCheckinGame game = MiyousheCheckinGame.of(role.gameBiz()).orElseThrow();
+            CheckinGame game = CheckinGame.of(role.gameBiz()).orElseThrow();
             results.add(checkinOne(game, role));
             if (i < supported.size() - 1) {
                 pause();
@@ -64,24 +69,25 @@ public class CheckinService {
         return new Summary(results, summarize(results));
     }
 
-    private RoleResult checkinOne(MiyousheCheckinGame game, GameRole role) {
-        LunaClient.Response info = luna.info(game, role.region(), role.gameUid());
-        if (!info.ok()) {
-            return fail(game, role, translate(info.retcode()), 0);
+    private RoleResult checkinOne(CheckinGame game, GameRole role) {
+        MihoyoResult result = luna.info(game, role.region(), role.gameUid());
+        if (!result.ok()) {
+            return fail(game, role, result.message(), 0);
         }
+        LunaInfo info = mapper.treeToValue(result.data(), LunaInfo.class);
 
-        if (info.data().path("first_bind").asBoolean(false)) {
+        if (info.firstBind()) {
             return new RoleResult(game.gameBiz(), game.displayName(), role.gameUid(), role.region(),
                     "FIRST_BIND", "还没在米游社绑定这个角色，先去 App 里绑定再签", 0, "");
         }
 
-        int days = info.data().path("total_sign_day").asInt(0);
-        if (info.data().path("is_sign").asBoolean(false)) {
+        int days = info.totalSignDay();
+        if (info.isSign()) {
             return new RoleResult(game.gameBiz(), game.displayName(), role.gameUid(), role.region(),
                     "ALREADY", "今天已经签过了", days, reward(game, days));
         }
 
-        LunaClient.Response sign = luna.sign(game, role.region(), role.gameUid());
+        MihoyoResult sign = luna.sign(game, role.region(), role.gameUid());
         if (sign.retcode() != 0) {
             return fail(game, role, translate(sign.retcode()), days);
         }
@@ -91,7 +97,7 @@ public class CheckinService {
         }
 
         // 复验：sign 返回 0 不等于真的签上了
-        LunaClient.Response after = luna.info(game, role.region(), role.gameUid());
+        MihoyoResult after = luna.info(game, role.region(), role.gameUid());
         if (!after.ok() || !after.data().path("is_sign").asBoolean(false)) {
             return new RoleResult(game.gameBiz(), game.displayName(), role.gameUid(), role.region(),
                     "FAILED", "签到请求返回成功，但复验未通过", days, "");
@@ -104,9 +110,9 @@ public class CheckinService {
     }
 
     /** 奖励名（「原石」x60 这种）；拿不到就返回空串，不影响签到结论。 */
-    private String reward(MiyousheCheckinGame game, int days) {
+    private String reward(CheckinGame game, int days) {
         try {
-            LunaClient.Response home = luna.home(game);
+            MihoyoResult home = luna.home(game);
             if (!home.ok()) {
                 return "";
             }
@@ -132,7 +138,7 @@ public class CheckinService {
         };
     }
 
-    private static RoleResult fail(MiyousheCheckinGame game, GameRole role, String message, int days) {
+    private static RoleResult fail(CheckinGame game, GameRole role, String message, int days) {
         return new RoleResult(game.gameBiz(), game.displayName(), role.gameUid(), role.region(),
                 "FAILED", message, days, "");
     }

@@ -2,6 +2,7 @@ package com.luobo.hoyoagent.mihoyo.checkin;
 
 import com.luobo.hoyoagent.mihoyo.dto.GameRole;
 import com.luobo.hoyoagent.mihoyo.role.GameRoleService;
+import com.luobo.hoyoagent.mihoyo.transport.MihoyoResult;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -39,9 +40,9 @@ class LunaClientTest {
 
     @Test
     void lunaInfoAcceptsCurrentCredential() {
-        GameRole genshin = roleService.firstOf(MiyousheCheckinGame.GENSHIN.gameBiz()).orElseThrow();
+        GameRole genshin = roleService.firstOf(CheckinGame.GENSHIN.gameBiz()).orElseThrow();
 
-        LunaClient.Response info = luna.info(MiyousheCheckinGame.GENSHIN, genshin.region(), genshin.gameUid());
+        MihoyoResult info = luna.info(CheckinGame.GENSHIN, genshin.region(), genshin.gameUid());
 
         assertThat(info.retcode()).isZero();
         assertThat(info.data().path("total_sign_day").asInt(0)).isGreaterThanOrEqualTo(0);

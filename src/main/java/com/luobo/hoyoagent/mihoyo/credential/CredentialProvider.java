@@ -1,5 +1,6 @@
-package com.luobo.hoyoagent.mihoyo.auth;
+package com.luobo.hoyoagent.mihoyo.credential;
 
+import com.luobo.hoyoagent.mihoyo.auth.CookieParser;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;

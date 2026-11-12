@@ -3,7 +3,7 @@ package com.luobo.hoyoagent.agent.tool;
 import com.luobo.hoyoagent.agent.observability.ToolCallRecorder;
 import com.luobo.hoyoagent.common.exception.BusinessException;
 import com.luobo.hoyoagent.mihoyo.api.MiyousheApi;
-import com.luobo.hoyoagent.mihoyo.checkin.MiyousheCheckinGame;
+import com.luobo.hoyoagent.mihoyo.checkin.CheckinGame;
 import com.luobo.hoyoagent.mihoyo.dto.CharacterDto;
 import com.luobo.hoyoagent.mihoyo.dto.GameRole;
 import com.luobo.hoyoagent.mihoyo.role.GameRoleService;
@@ -50,7 +50,7 @@ public class PlayerTool {
 
         Optional<GameRole> role;
         try {
-            role = roleService.firstOf(MiyousheCheckinGame.GENSHIN.gameBiz());
+            role = roleService.firstOf(CheckinGame.GENSHIN.gameBiz());
         } catch (BusinessException e) {
             return "【结论】无法查询角色列表：" + e.getMessage();
         }

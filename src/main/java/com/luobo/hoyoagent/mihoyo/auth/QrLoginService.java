@@ -3,6 +3,9 @@ package com.luobo.hoyoagent.mihoyo.auth;
 import com.luobo.hoyoagent.common.exception.BusinessException;
 import com.luobo.hoyoagent.common.exception.ErrorCode;
 import com.luobo.hoyoagent.mihoyo.auth.passport.PassportClient;
+import com.luobo.hoyoagent.mihoyo.credential.CookieJar;
+import com.luobo.hoyoagent.mihoyo.credential.Credential;
+import com.luobo.hoyoagent.mihoyo.credential.CredentialProvider;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -10,10 +13,8 @@ import tools.jackson.databind.JsonNode;
 
 import java.time.Duration;
 import java.time.Instant;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.StringJoiner;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
@@ -107,14 +108,10 @@ public class QrLoginService {
             throw new BusinessException(ErrorCode.MOYO_AUTH_EXPIRED, "当前凭据缺少 stoken/mid，请重新扫码绑定");
         }
         Map<String, String> v2 = passport.exchangeV2(current.stoken(), current.mid());
-        String merged = mergeCookie(current.cookieHeader(), current.uid(), v2);
-        credentials.update(new Credential(merged, current.uid(), current.mid(), current.stoken()));
-
-        boolean hasLtokenV2 = merged.contains("ltoken_v2=");
-        boolean hasCookieTokenV2 = merged.contains("cookie_token_v2=");
-        log.info("v2 凭据已刷新: ltoken_v2={} cookie_token_v2={}", hasLtokenV2, hasCookieTokenV2);
-        return new RefreshResult(hasLtokenV2, hasCookieTokenV2,
-                hasLtokenV2 ? "v2 凭据已刷新" : "刷新成功，但响应里没有 ltoken_v2");
+        CookieJar merged = current.cookies().merge(v2);
+        credentials.update(current.withCookies(merged));
+        return new RefreshResult(merged.has("ltoken_v2"), merged.has("cookie_token_v2"),
+                merged.has("ltoken_v2") ? "v2 凭据已刷新" : "刷新成功，但响应里没有 ltoken_v2");
     }
 
     private void handleOk(Session session, PassportClient.QrPoll poll) {
@@ -149,9 +146,12 @@ public class QrLoginService {
             log.warn("v2 凭据换取失败（不影响签到，但战绩接口可能 5003）: {}", e.getMessage());
         }
 
-        String cookie = buildCookie(stoken, mid, aid, ltoken.token(), cookieToken.token(), v2);
-        Credential credential = new Credential(cookie, aid, mid, stoken);
-        credentials.update(credential);
+        CookieJar jar = CookieJar.empty()
+                .with("stoken", stoken).with("mid", mid).with("stuid", aid)
+                .with("ltoken", ltoken.token()).with("ltuid", aid)
+                .with("cookie_token", cookieToken.token()).with("account_id", aid)
+                .merge(v2);
+        credentials.update(new Credential(jar, aid, mid, stoken));
 
         session.uid = aid;
         session.mid = mid;
@@ -183,65 +183,6 @@ public class QrLoginService {
             }
         }
         return "";
-    }
-
-    /** 签到只认 stuid+stoken+mid；ltoken / cookie_token 是给查询类接口用的，能拿到就一并存。 */
-    private static String buildCookie(String stoken, String mid, String aid,
-                                      String ltoken, String cookieToken, Map<String, String> v2) {
-        Map<String, String> parts = new LinkedHashMap<>();
-        parts.put("stoken", stoken);
-        parts.put("mid", mid);
-        parts.put("stuid", aid);
-        parts.put("ltoken", ltoken);
-        parts.put("ltuid", aid);
-        parts.put("cookie_token", cookieToken);
-        parts.put("account_id", aid);
-        if (v2 != null) {
-            // 只收已知的凭据字段，别把无关 cookie 混进来
-            for (String key : V2_KEYS) {
-                String value = v2.get(key);
-                if (value != null && !value.isBlank()) {
-                    parts.put(key, value);
-                }
-            }
-        }
-        return join(parts);
-    }
-
-    /** 用新拿到的 v2 cookie 覆盖当前凭据，其余字段原样保留。 */
-    private static String mergeCookie(String existing, String aid, Map<String, String> v2) {
-        Map<String, String> parts = new LinkedHashMap<>();
-        if (existing != null) {
-            for (String part : existing.split(";")) {
-                String s = part.trim();
-                int i = s.indexOf('=');
-                if (i > 0) {
-                    parts.putIfAbsent(s.substring(0, i), s.substring(i + 1));
-                }
-            }
-        }
-        for (String key : V2_KEYS) {
-            String value = v2.get(key);
-            if (value != null && !value.isBlank()) {
-                parts.put(key, value);
-            }
-        }
-        if (aid != null && !aid.isBlank()) {
-            parts.put("stuid", aid);
-            parts.putIfAbsent("ltuid", aid);
-            parts.putIfAbsent("account_id", aid);
-        }
-        return join(parts);
-    }
-
-    private static String join(Map<String, String> parts) {
-        StringJoiner joiner = new StringJoiner("; ");
-        parts.forEach((k, v) -> {
-            if (v != null && !v.isBlank()) {
-                joiner.add(k + "=" + v);
-            }
-        });
-        return joiner.toString();
     }
 
     private void purgeExpired() {

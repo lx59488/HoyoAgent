@@ -1,5 +1,8 @@
 package com.luobo.hoyoagent.mihoyo.auth;
 
+import com.luobo.hoyoagent.mihoyo.credential.CookieJar;
+import com.luobo.hoyoagent.mihoyo.credential.Credential;
+
 import java.util.HashMap;
 import java.util.Map;
 
@@ -21,7 +24,7 @@ public class CookieParser {
         String uid = firstPresent(map, "ltuid_v2", "ltuid", "account_id_v2", "account_id", "stuid");
         String mid = firstPresent(map, "ltmid_v2", "mid", "account_mid_v2");
         String stoken = firstPresent(map, "stoken", "stoken_v2");
-        return new Credential(rawCookie == null ? "" : rawCookie, uid, mid, stoken);
+        return new Credential(CookieJar.of(rawCookie), uid, mid, stoken);
     }
 
 

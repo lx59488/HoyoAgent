@@ -1,5 +1,6 @@
 package com.luobo.hoyoagent.mihoyo.auth;
 
+import com.luobo.hoyoagent.mihoyo.credential.Credential;
 import org.junit.jupiter.api.Test;
 
 import static org.assertj.core.api.Assertions.assertThat;

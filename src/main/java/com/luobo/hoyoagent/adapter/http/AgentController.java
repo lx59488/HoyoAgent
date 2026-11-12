@@ -2,6 +2,8 @@ package com.luobo.hoyoagent.adapter.http;
 
 import com.luobo.hoyoagent.agent.MihoyoAssistant;
 import com.luobo.hoyoagent.agent.observability.ToolCallRecorder;
+import com.luobo.hoyoagent.common.exception.ErrorCode;
+import com.luobo.hoyoagent.common.result.Result;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
@@ -22,11 +24,12 @@ public class AgentController {
     }
 
     @GetMapping("/agent")
-    public Map<String, Object> agent(@RequestParam("q") String q) {
+    public Result<AgentAnswer> agent(@RequestParam("q") String q) {
         try {
-            return finish(true, assistant.chat(q), null);
+            String reply = assistant.chat(q);
+            return Result.success(new AgentAnswer(true, reply, recorder.drain()));
         } catch (Exception e) {
-            return finish(false, null, e);
+            return Result.error(ErrorCode.INTERNAL_ERROR, e.getClass().getSimpleName());
         }
     }
 
@@ -44,4 +47,8 @@ public class AgentController {
         body.put("toolsCalled", calls);
         return body;
     }
+
+
+    public record AgentAnswer(boolean ok, String reply, List<String> toolsCalled) {}
+
 }

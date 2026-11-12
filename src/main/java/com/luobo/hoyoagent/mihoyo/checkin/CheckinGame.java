@@ -12,7 +12,7 @@ import java.util.Optional;
  * <p>绝区零的 host 和路径都不同（{@code act-nap-api} + {@code /event/luna/zzz}），
  * 不能简单把 act_id 换掉就用。
  */
-public enum MiyousheCheckinGame {
+public enum CheckinGame {
 
     GENSHIN("hk4e_cn", "原神", "e202311201442471",
             "https://api-takumi.mihoyo.com", "/event/luna", "https://act.mihoyo.com/", "hk4e"),
@@ -37,8 +37,8 @@ public enum MiyousheCheckinGame {
 
     private final String signGame;
 
-    MiyousheCheckinGame(String gameBiz, String displayName, String actId,
-                        String baseUrl, String lunaPath, String referer, String signGame) {
+    CheckinGame(String gameBiz, String displayName, String actId,
+                String baseUrl, String lunaPath, String referer, String signGame) {
         this.gameBiz = gameBiz;
         this.displayName = displayName;
         this.actId = actId;
@@ -72,7 +72,7 @@ public enum MiyousheCheckinGame {
         return baseUrl + lunaPath + action;
     }
 
-    public static Optional<MiyousheCheckinGame> of(String gameBiz) {
+    public static Optional<CheckinGame> of(String gameBiz) {
         return Arrays.stream(values()).filter(g -> g.gameBiz.equals(gameBiz)).findFirst();
     }
 }
