@@ -29,6 +29,10 @@ hoyo:
     zone: ${HOYO_CHECKIN_ZONE:Asia/Shanghai}    # cron 与"今天"都按这个时区算
     startup-delay: ${HOYO_CHECKIN_STARTUP_DELAY:60s}  # 启动后多久补签（错过 00:10 时）
     dir: ${HOYO_CHECKIN_DIR:}           # 默认 ~/.hoyo/checkin，一天一个 JSON
+  memory:
+    max-messages: ${HOYO_MEMORY_MAX_MESSAGES:20}   # 一次工具调用占 3~4 条，20 ≈ 4~5 轮
+    max-sessions: ${HOYO_MEMORY_MAX_SESSIONS:200}  # 超了淘汰最久未用
+    idle-ttl: ${HOYO_MEMORY_IDLE_TTL:2h}           # 空闲超时 = 下次访问当作新会话
 
 # 注：UA / app_version / client_type / salt / role-id / server 都已从配置移除
 #   - 请求头是成组的（salt 与版本必须配对），统一由 Profiles 管理

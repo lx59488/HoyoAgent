@@ -38,16 +38,19 @@ $cases = @(
     @{ id = 8; cat = '负例·能力外';    q = '我深渊打到哪了';          expect = @() }
 )
 
+# 每条用例一个独立会话：否则第 3 条会看见第 1 条的上下文，命中率是假的
+$runId = [guid]::NewGuid().ToString('N').Substring(0, 8)
 $rows = @()
 $misses = @()
 $pass = 0
 
 foreach ($c in $cases) {
+    $session = "$runId-$($c.id)"
     $url = "$BaseUrl/agent?q=$([uri]::EscapeDataString($c.q))"
     $sw = [System.Diagnostics.Stopwatch]::StartNew()
     $reply = ''
     try {
-        $r = Invoke-RestMethod $url -TimeoutSec 90
+        $r = Invoke-RestMethod $url -TimeoutSec 90 -Headers @{ 'X-Session-Id' = $session }
         # 统一封皮：{code, message, data:{reply, toolsCalled}}
         if ($null -ne $r.code -and $r.code -ne 200) {
             throw "API code=$($r.code): $($r.message)"

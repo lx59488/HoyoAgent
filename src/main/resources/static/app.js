@@ -4,8 +4,26 @@
 /* 状态                                                                */
 /* ------------------------------------------------------------------ */
 
+const SESSION_KEY = "hoyoagent.session";
+
+function newSessionId() {
+    return crypto.randomUUID
+        ? crypto.randomUUID()
+        : `s-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+}
+
+function loadSessionId() {
+    let id = localStorage.getItem(SESSION_KEY);
+    if (!id) {
+        id = newSessionId();
+        localStorage.setItem(SESSION_KEY, id);
+    }
+    return id;
+}
+
 const state = {
     mode: "agent",
+    sessionId: loadSessionId(),
     ticket: null,
     pollTimer: null,
     tickTimer: null,
@@ -513,8 +531,11 @@ async function sendMessage(text) {
     setBusy(true);
 
     const path = state.mode === "agent" ? "/agent" : "/chat";
+    const options = state.mode === "agent"
+        ? { headers: { "X-Session-Id": state.sessionId } }
+        : {};
     try {
-        const result = await request(`${path}?q=${encodeURIComponent(message)}`);
+        const result = await request(`${path}?q=${encodeURIComponent(message)}`, options);
         const data = result.data || {};
         addMessage("assistant", data.reply || "（空回复）", data.toolsCalled || []);
     } catch (error) {
@@ -539,6 +560,11 @@ $("#btn-status").addEventListener("click", loadStatus);
 $("#btn-refresh").addEventListener("click", refreshV2);
 $("#btn-roles").addEventListener("click", loadRoles);
 $("#btn-checkin").addEventListener("click", runCheckin);
+$("#btn-new-session").addEventListener("click", () => {
+    state.sessionId = newSessionId();
+    localStorage.setItem(SESSION_KEY, state.sessionId);
+    addMessage("note", `新会话：${state.sessionId}`);
+});
 
 document.querySelectorAll(".seg").forEach((button) => {
     button.addEventListener("click", () => {
