@@ -164,6 +164,7 @@ async function loadStatus() {
         setConnection(true, "已连接");
         setAccountPill(result.data);
         renderAccount(result.data);
+        loadCheckin();
     } catch (error) {
         setConnection(false, "未连接");
         $("#account-pill").className = "pill pill-muted";
@@ -329,6 +330,118 @@ async function loadRoles() {
 }
 
 /* ------------------------------------------------------------------ */
+/* 每日签到                                                            */
+/* ------------------------------------------------------------------ */
+
+const OUTCOME_LABEL = { DONE: "已签", PARTIAL: "部分失败", FAILED: "失败", SKIPPED: "跳过" };
+
+const TRIGGER_LABEL = { SCHEDULED: "定时", STARTUP: "启动补签", MANUAL: "手动" };
+
+function outcomePill(outcome) {
+    switch (outcome) {
+        case "DONE":
+            return "pill-ok";
+        case "PARTIAL":
+            return "pill-warn";
+        case "FAILED":
+            return "pill-err";
+        default:
+            return "pill-muted";
+    }
+}
+
+/** 后端给的是带偏移的 ISO 串（如 2026-11-14T00:10+08:00），直接切字符串，别让浏览器再按本地时区解释一次。 */
+function formatScheduled(iso) {
+    if (!iso) {
+        return "—";
+    }
+    const match = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/.exec(iso);
+    return match ? `${match[2]}-${match[3]} ${match[4]}:${match[5]}` : iso;
+}
+
+async function loadCheckin() {
+    try {
+        const result = await request("/api/checkin/status");
+        renderCheckin(result.data);
+    } catch (error) {
+        $("#checkin-pill").className = "pill pill-err";
+        $("#checkin-pill").textContent = "读取失败";
+        $("#checkin-msg").textContent = "读取签到状态失败：" + error.message;
+    }
+}
+
+function renderCheckin(status) {
+    const pill = $("#checkin-pill");
+    const today = status.today;
+
+    if (!status.enabled) {
+        pill.className = "pill pill-muted";
+        pill.textContent = "已关闭";
+    } else if (!today) {
+        pill.className = "pill pill-warn";
+        pill.textContent = "今天未跑";
+    } else {
+        pill.className = "pill " + outcomePill(today.outcome);
+        pill.textContent = OUTCOME_LABEL[today.outcome] || today.outcome;
+    }
+
+    $("#checkin-when").textContent = status.enabled
+        ? `下次 ${formatScheduled(status.nextRun)}`
+        : "自动签到已关闭（hoyo.checkin.enabled=false）";
+
+    const message = $("#checkin-msg");
+    if (status.needsAttention) {
+        message.textContent = status.attention || "需要看一眼";
+        message.className = "hint warn";
+    } else if (today) {
+        message.textContent = `${TRIGGER_LABEL[today.trigger] || today.trigger} · ${formatScheduled(today.finishedAt)} · ${today.message}`;
+        message.className = "hint";
+    } else {
+        message.textContent = "今天还没到点；00:10 之后会自动签，也可以现在手动跑一次。";
+        message.className = "hint";
+    }
+
+    const list = $("#checkin-days");
+    list.replaceChildren();
+    const recent = status.recent || [];
+    if (!recent.length) {
+        const empty = document.createElement("li");
+        empty.textContent = "还没有签到记录";
+        list.append(empty);
+        return;
+    }
+    recent.forEach((record) => {
+        const item = document.createElement("li");
+        const left = document.createElement("span");
+        const outcome = document.createElement("span");
+        outcome.className = "pill " + outcomePill(record.outcome);
+        outcome.textContent = OUTCOME_LABEL[record.outcome] || record.outcome;
+        left.append(document.createTextNode(`${(record.date || "").slice(5)} `), outcome);
+        const right = document.createElement("span");
+        right.textContent = record.message || "";
+        item.append(left, right);
+        list.append(item);
+    });
+}
+
+async function runCheckin() {
+    const button = $("#btn-checkin");
+    button.disabled = true;
+    button.textContent = "签到中…";
+    try {
+        const result = await request("/api/checkin/run", { method: "POST" });
+        const record = result.data || {};
+        showNote(`签到：${OUTCOME_LABEL[record.outcome] || record.outcome} — ${record.message || ""}`);
+        await loadCheckin();
+    } catch (error) {
+        showNote("签到失败：" + error.message);
+    } finally {
+        button.disabled = false;
+        button.textContent = "现在跑一次";
+    }
+}
+
+/* ------------------------------------------------------------------ */
 /* 对话                                                                */
 /* ------------------------------------------------------------------ */
 
@@ -425,6 +538,7 @@ $("#btn-qr").addEventListener("click", startQr);
 $("#btn-status").addEventListener("click", loadStatus);
 $("#btn-refresh").addEventListener("click", refreshV2);
 $("#btn-roles").addEventListener("click", loadRoles);
+$("#btn-checkin").addEventListener("click", runCheckin);
 
 document.querySelectorAll(".seg").forEach((button) => {
     button.addEventListener("click", () => {

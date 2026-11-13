@@ -23,6 +23,12 @@ hoyo:
   cookie: ${HOYO_COOKIE:}                # 兜底；扫码写入账号目录后优先用文件
   user-id: ${HOYO_USER_ID:local}         # 单用户阶段固定 local；多用户后由平台适配器注入
   # account-dir: ${HOYO_ACCOUNT_DIR:}    # 默认 ~/.hoyo/accounts（每用户一个 .account 文件）
+  checkin:
+    enabled: ${HOYO_CHECKIN_ENABLED:true}
+    cron: "${HOYO_CHECKIN_CRON:0 10 0 * * *}"   # 秒 分 时 日 月 周
+    zone: ${HOYO_CHECKIN_ZONE:Asia/Shanghai}    # cron 与"今天"都按这个时区算
+    startup-delay: ${HOYO_CHECKIN_STARTUP_DELAY:60s}  # 启动后多久补签（错过 00:10 时）
+    dir: ${HOYO_CHECKIN_DIR:}           # 默认 ~/.hoyo/checkin，一天一个 JSON
 
 # 注：UA / app_version / client_type / salt / role-id / server 都已从配置移除
 #   - 请求头是成组的（salt 与版本必须配对），统一由 Profiles 管理

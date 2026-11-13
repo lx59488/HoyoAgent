@@ -1,8 +1,11 @@
 package com.luobo.hoyoagent.mihoyo.checkin;
 
 import com.luobo.hoyoagent.common.exception.BusinessException;
+import com.luobo.hoyoagent.common.exception.ErrorCode;
 import com.luobo.hoyoagent.mihoyo.checkin.dto.LunaInfo;
 import com.luobo.hoyoagent.mihoyo.dto.GameRole;
+import com.luobo.hoyoagent.mihoyo.error.ErrorKind;
+import com.luobo.hoyoagent.mihoyo.error.MihoyoError;
 import com.luobo.hoyoagent.mihoyo.role.GameRoleService;
 import com.luobo.hoyoagent.mihoyo.transport.MihoyoResult;
 import org.slf4j.Logger;
@@ -20,7 +23,8 @@ import java.util.List;
  * 失败原因能区分"登录失效""没绑定角色""弹了验证码"，而不是笼统报错。
  *
  * <p>幂等靠 {@code is_sign}：同一天重复调用只会返回"今天已经签过"，不会重复签。
- * 跨天调度的持久化记录（{@code checkin_records}）留到多用户阶段。
+ * 定时调度与"今天跑过没有"的记录在 {@link CheckinScheduler} / {@link CheckinRecordStore}，
+ * 本类不碰文件系统，也不决定"要不要签"。
  */
 @Service
 public class CheckinService {
@@ -47,7 +51,7 @@ public class CheckinService {
         try {
             roles = roleService.roles();
         } catch (BusinessException e) {
-            return new Summary(List.of(), "读取绑定角色失败：" + e.getMessage());
+            return new Summary(List.of(), "读取绑定角色失败：" + e.getMessage(), kindOf(e));
         }
 
         List<GameRole> supported = roles.stream()
@@ -72,41 +76,42 @@ public class CheckinService {
     private RoleResult checkinOne(CheckinGame game, GameRole role) {
         MihoyoResult result = luna.info(game, role.region(), role.gameUid());
         if (!result.ok()) {
-            return fail(game, role, result.error().userMessage(), 0);
+            return fail(game, role, result.error(), 0);
         }
         LunaInfo info = mapper.treeToValue(result.data(), LunaInfo.class);
 
         if (info.isFirstBind()) {
             return new RoleResult(game.gameBiz(), game.displayName(), role.gameUid(), role.region(),
-                    "FIRST_BIND", "还没在米游社绑定这个角色，先去 App 里绑定再签", 0, "");
+                    "FIRST_BIND", "还没在米游社绑定这个角色，先去 App 里绑定再签", 0, "", null);
         }
 
         int days = info.totalSignDay();
         if (info.isSign()) {
             return new RoleResult(game.gameBiz(), game.displayName(), role.gameUid(), role.region(),
-                    "ALREADY", "今天已经签过了", days, reward(game, days));
+                    "ALREADY", "今天已经签过了", days, reward(game, days), null);
         }
 
         MihoyoResult sign = luna.sign(game, role.region(), role.gameUid());
         if (sign.retcode() != 0) {
-            return fail(game, role, sign.error().userMessage(), days);
+            return fail(game, role, sign.error(), days);
         }
         if (sign.data().path("success").asInt(0) != 0) {
             return new RoleResult(game.gameBiz(), game.displayName(), role.gameUid(), role.region(),
-                    "CAPTCHA", "签到触发了人机验证，需要去米游社 App 手动签一次", days, "");
+                    "CAPTCHA", "签到触发了人机验证，需要去米游社 App 手动签一次", days, "",
+                    ErrorKind.NEED_VERIFY);
         }
 
         // 复验：sign 返回 0 不等于真的签上了
         MihoyoResult after = luna.info(game, role.region(), role.gameUid());
         if (!after.ok() || !after.data().path("is_sign").asBoolean(false)) {
             return new RoleResult(game.gameBiz(), game.displayName(), role.gameUid(), role.region(),
-                    "FAILED", "签到请求返回成功，但复验未通过", days, "");
+                    "FAILED", "签到请求返回成功，但复验未通过", days, "", ErrorKind.UNKNOWN);
         }
 
         int afterDays = after.data().path("total_sign_day").asInt(days);
         log.info("签到成功: {} uid={} 累计 {} 天", game.displayName(), role.gameUid(), afterDays);
         return new RoleResult(game.gameBiz(), game.displayName(), role.gameUid(), role.region(),
-                "SIGNED", "签到成功", afterDays, reward(game, afterDays));
+                "SIGNED", "签到成功", afterDays, reward(game, afterDays), null);
     }
 
     /** 奖励名（「原石」x60 这种）；拿不到就返回空串，不影响签到结论。 */
@@ -129,9 +134,27 @@ public class CheckinService {
         }
     }
 
-    private static RoleResult fail(CheckinGame game, GameRole role, String message, int days) {
+    private static RoleResult fail(CheckinGame game, GameRole role, MihoyoError error, int days) {
         return new RoleResult(game.gameBiz(), game.displayName(), role.gameUid(), role.region(),
-                "FAILED", message, days, "");
+                "FAILED", error.userMessage(), days, "", error.kind());
+    }
+
+    /** 把 {@link BusinessException} 的 9xxx 码翻译回类别。读角色这一步没有 MihoyoResult 可看。 */
+    private static ErrorKind kindOf(BusinessException e) {
+        Integer code = e.getCode();
+        if (ErrorCode.MOYO_AUTH_EXPIRED.getCode().equals(code)) {
+            return ErrorKind.AUTH;
+        }
+        if (ErrorCode.MOYO_NEED_VERIFY.getCode().equals(code)) {
+            return ErrorKind.NEED_VERIFY;
+        }
+        if (ErrorCode.MOYO_RATE_LIMITED.getCode().equals(code)) {
+            return ErrorKind.RATE_LIMIT;
+        }
+        if (ErrorCode.MOYO_SIGN_INVALID.getCode().equals(code)) {
+            return ErrorKind.SIGN;
+        }
+        return ErrorKind.UNKNOWN;
     }
 
     private static String summarize(List<RoleResult> results) {
@@ -158,7 +181,12 @@ public class CheckinService {
         }
     }
 
-    /** status: SIGNED（今天新签）/ ALREADY / FIRST_BIND / CAPTCHA / FAILED */
+    /**
+     * status: SIGNED（今天新签）/ ALREADY / FIRST_BIND / CAPTCHA / FAILED。
+     *
+     * <p>{@code kind} 是失败类别（AUTH / RISK / NEED_VERIFY…），成功时为 {@code null}。
+     * 有了它，调度器不用去正则匹配中文文案就能判断"该不该提示重新扫码"。
+     */
     public record RoleResult(String gameBiz,
                              String gameName,
                              String uid,
@@ -166,9 +194,22 @@ public class CheckinService {
                              String status,
                              String message,
                              int totalDays,
-                             String reward) {
+                             String reward,
+                             ErrorKind kind) {
+
+        /** 这一个角色今天算过关了吗（新签或本来签过）。 */
+        public boolean ok() {
+            return "SIGNED".equals(status) || "ALREADY".equals(status);
+        }
     }
 
-    public record Summary(List<RoleResult> results, String message) {
+    /**
+     * @param kind 整轮最需要处理的失败类别；全部成功时为 {@code null}
+     */
+    public record Summary(List<RoleResult> results, String message, ErrorKind kind) {
+
+        public Summary(List<RoleResult> results, String message) {
+            this(results, message, null);
+        }
     }
 }

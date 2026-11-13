@@ -231,6 +231,32 @@ button:active:not(:disabled) { transform: translateY(1px); }
 }
 .roles li span { color: var(--muted); }
 
+/* ---------- 每日签到 ---------- */
+.checkin-line {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-bottom: 4px;
+}
+
+.checkin-line .muted { font-size: 12px; }
+
+.hint.warn { color: var(--warn); }
+
+#checkin-days { margin-bottom: 10px; }
+
+#checkin-days li span:last-child {
+    text-align: right;
+    max-width: 62%;
+}
+
+/* .roles li span 的灰会盖掉 .pill-* 的颜色，这里按 id 提权 */
+#checkin-days .pill { color: inherit; }
+#checkin-days .pill-ok { color: var(--ok); }
+#checkin-days .pill-warn { color: var(--warn); }
+#checkin-days .pill-err { color: var(--err); }
+
 /* ---------- chat ---------- */
 .chat { display: flex; flex-direction: column; min-height: 560px; }
 

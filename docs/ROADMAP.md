@@ -4,7 +4,8 @@
 > 用法：从上往下做，每完成一条把 `[ ]` 改成 `[x]`。每个阶段结束后打一个 git tag（`phase-1`、`phase-2`…）。
 > 设计原则：**先用假数据学 Agent，再接真实 API**。两条线并行、互不阻塞。
 
-**最后更新：2026-11-12**（P1~P6 纵向切片已通；新增 P9「登录与签到」，扫码登录代码就绪待真机验收；P3 的 10 条用例表已作废，见 P3 后记）
+**最后更新：2026-11-13**（P1~P6 纵向切片已通；P9 登录 / 签到 / 定时调度已落地，等连续 3 天自动签到的验收；
+P3 的 10 条用例表已作废，见 P3 后记）
 
 ---
 
@@ -21,7 +22,7 @@
 | P6 | 接入真实数据 | 自然语言查真实战绩 | 半天 | ⚠️ 已回退：`character/list` 与 `PlayerTool` 于 11-13 删除，能力由 P9 签到承接 |
 | P7 | 记忆与多轮 | 多轮对话不丢上下文 | 1 天 | 未开始 |
 | P8 | 工程化扩展（选做） | 多账号 / 可观测 / MCP | 长期 | 未开始 |
-| P9 | 登录与签到 | 扫码拿 stoken，能签当天 | 2~3 天 | 🚧 登录+签到已通，缺定时调度 |
+| P9 | 登录与签到 | 扫码拿 stoken，能签当天 | 2~3 天 | 🚧 登录 / 签到 / 定时已通，待连续 3 天观察 |
 
 > **状态校准自 2026-11-07 的代码核对**：P4-5（DeviceIdProvider）、P4-12（关日志）、
 > P6 纵向切片其实都已完成，只是清单没跟上。**这份清单就是项目的单一事实来源，
@@ -63,6 +64,9 @@ com.luobo.hoyoagent
     ├── auth/                          ← QrLoginService + passport/{PassportClient,PassportDevice}
     ├── record/RecordClient.java       ← 绑定角色 / App 配置（character/list 已删除）
     ├── checkin/                       ← CheckinGame / LunaClient / CheckinService
+    │   ├── CheckinScheduler.java      ← P9-8：00:10 定时 + 启动补签 + 当日幂等 + [CHECKIN][ALERT]
+    │   ├── CheckinRecord.java         ← 一次运行的快照（DONE / PARTIAL / FAILED / SKIPPED）
+    │   └── CheckinRecordStore.java    ← ~/.hoyo/checkin/YYYY-MM-DD.json，原子写、读坏当没有
     ├── role/GameRoleService.java      ← 角色自动发现（10 分钟缓存）
     ├── client/DeviceIdProvider.java   ← 持久化 device_id（配置 > ~/.hoyo/device-id > 生成）
     ├── dto/GameRole.java              ← 绑定角色
@@ -96,7 +100,8 @@ docs/mihoyo-auth.md                    ← 登录/多用户设计稿；A/B 已�
 接口：`GET /`（调试页：扫码绑定 + 对话）、`GET /chat?q=`（纯问答）、
 `GET /agent?q=`（带工具，返回 `{code, message, data:{reply, toolsCalled}}`）、
 `POST /api/auth/qr` + `GET /api/auth/qr/{ticket}`（扫码绑定）、`GET /api/auth/status`（绑定状态）、
-`POST /api/checkin`（手动签到）
+`POST /api/checkin`（裸调签到，不落盘）、`POST /api/checkin/run`（走调度路径，今天已签则跳过）、
+`GET /api/checkin/status`（今日结果 + 最近 7 天 + 是否该看一眼）
 
 **结构决策**：原计划放 `adapter.mihoyo`，实际改为顶层 `mihoyo/`。原因是后续会有多个入站适配器（http / onebot / console），把「外部系统客户端」提到顶层更好表达边界。约定：**`adapter` 只表示入站，`mihoyo` 表示出站**。
 
@@ -445,8 +450,11 @@ P6-3 的真实角色输出保留为历史证据；「自然语言 → 真实数�
 - [x] P9-6 `luna/info` 复测 —— **结论被推翻**：签到认 `cookie_token`+`account_id`，不是 stoken
 - [x] P9-7 三游戏签到打通：星铁/绝区零真签成功，原神当日已签返回 `ALREADY`；幂等已验证
 - [x] P9-7b 角色自动发现（`GameRoleService`），替掉写死的 `HOYO_ROLE_ID`
-- [ ] P9-8 `@Scheduled` 每天 00:10 + 当日记录幂等（先文件，多用户再上库）
+- [x] P9-8 `@Scheduled` 每天 00:10 + 当日记录幂等（先文件，多用户再上库）+ 失败可见性，
+  见下面「P9-8 的三个决定」
 - [ ] P9-9 stoken 失效时主动提示重新扫码（`/api/auth/refresh` 失败 → 通知）
+  —— 现在失败会亮灯（`/api/checkin/status` 的 `attention` + `kind=AUTH` 日志），但**不会自动续期**；
+  没有通知渠道之前，"提示"就是状态页那行红字
 - [x] ~~P9-10 排查 `character/list` 的 `5003`~~ —— **已关闭**：该接口 11-13 删除；实验确认与请求头无关
   （新账号四种头组合全 `5003`，旧账号同一套头 `retcode=0`）
 
@@ -457,7 +465,44 @@ P6-3 的真实角色输出保留为历史证据；「自然语言 → 真实数�
 ```powershell
 .\mvnw.cmd -B -ntp spring-boot:run        # 终端 1
 pwsh -NoProfile -File .\scripts\login-qr.ps1   # 终端 2
+
+# 看今天到底签没签、下一次几点、要不要处理
+Invoke-RestMethod "http://localhost:8080/api/checkin/status" | ConvertTo-Json -Depth 6
+# 手动跑一次（今天已签就不重复请求；force 强制重跑）
+Invoke-RestMethod "http://localhost:8080/api/checkin/run?force=true" -Method Post | ConvertTo-Json -Depth 6
 ```
+
+### P9-8 的三个决定（比代码重要）
+
+1. **只试一次，失败不自动重试。** 重试会把"连续 3 天成功"这个验收条件糊掉——失败就该亮灯，
+   而不是靠重试掩盖。补跑是人的动作：`POST /api/checkin/run?force=true`。
+2. **启动补签。** cron 只在进程活着时触发，笔记本合盖一晚就错过整天。
+   启动后 `hoyo.checkin.startup-delay`（默认 60s）补一次；今天已有 `DONE` 记录就跳过。
+   补签跑在**虚拟线程**里：守护线程，既不卡 `SpringApplication.run`，也不会拖住测试 JVM。
+3. **失败可见，且分类。** `[CHECKIN][ALERT]` 前缀只给失败用，日志里搜一次就能捞全；
+   同时写 `~/.hoyo/checkin/YYYY-MM-DD.json`，重启后状态页仍能读到。
+   `kind` 来自 `MihoyoError`（AUTH / NEED_VERIFY / RISK…），所以"要重新扫码"和"网络抖了一下"
+   在日志和状态里是**两种不同的话**，不用正则匹配中文。
+
+**记录文件的形状**（一天一个 JSON，人直接打开也能读）：
+
+```json
+{
+  "userId": "local", "date": "2026-11-13",
+  "trigger": "SCHEDULED",            // SCHEDULED / STARTUP / MANUAL
+  "outcome": "DONE",                 // DONE / PARTIAL / FAILED / SKIPPED
+  "kind": null,                      // 失败类别，成功时 null
+  "startedAt": "2026-11-13T00:10:00.1+08:00", "finishedAt": "2026-11-13T00:10:04.3+08:00",
+  "message": "3 个角色：新签 2，已签 1",
+  "roles": [ { "gameBiz": "hk4e_cn", "status": "ALREADY", "totalDays": 12, "reward": "「原石」x60" } ]
+}
+```
+
+**两条容错约定**（都有单测锁住）：读坏的文件当"没有记录"（宁可多签一次，服务端幂等兜底），
+写失败只打日志（记录是观测，不是业务结果）。
+
+**已知边界**：单用户——文件名只有日期，`userId` 写在文件里，换账号时会覆盖上一个人的记录；
+多用户时按 `userId` 分目录或直接上库，`CheckinScheduler` 不用改。
 
 ---
 
@@ -577,6 +622,14 @@ pwsh -NoProfile -File .\scripts\smoke-agent.ps1
 Invoke-RestMethod "http://localhost:8080/chat?q=你好"
 Invoke-RestMethod "http://localhost:8080/agent?q=萝卜有哪些原神角色" | ConvertTo-Json -Depth 4
 
+# 签到：状态 / 手动跑调度路径 / 裸调（不落盘）
+Invoke-RestMethod "http://localhost:8080/api/checkin/status" | ConvertTo-Json -Depth 6
+Invoke-RestMethod "http://localhost:8080/api/checkin/run" -Method Post | ConvertTo-Json -Depth 6
+Invoke-RestMethod "http://localhost:8080/api/checkin" -Method Post | ConvertTo-Json -Depth 6
+
+# 定时任务失败后想从日志里捞：搜这一个前缀就够了
+Select-String -Path .\logs\*.log -Pattern '\[CHECKIN\]\[ALERT\]'
+
 # 扫码绑定米游社：终端 1 起服务，终端 2 跑脚本（会弹出二维码 PNG）
 pwsh -NoProfile -File .\scripts\login-qr.ps1
 
@@ -624,6 +677,10 @@ java -jar target\HoyoAgent-0.0.1-SNAPSHOT.jar "--spring.config.import=optional:f
 12. **Mockito 的 `self-attaching` / `dynamic agent` 警告是噪音**：Mockito 5 的 inline mock maker 运行时挂 byte-buddy agent，JDK 21+ 会告警，与服务代码无关
 13. **删了源文件不等于删了类**：`mvn test` 不会清理 `target/classes` 里的旧 `.class`，Spring 组件扫描照样扫到它。2026-11-07 改名 `FakePlayerTool` → `PlayerTool` 后直接 `test`，报 `IllegalConfigurationException: Duplicated definition for tool: getPlayerCharacters`。**动过类名/包名/删过类，一律用 `clean test`**
 14. **"不调用工具"的用例可能是恒真的**：工具不存在时，模型当然不会调用它。测能力边界必须放诱饵（`DecoyTool`），否则通过与否都不含信息
+15. **`@Scheduled` 只在进程活着时触发**：关机/合盖的那一晚等于整天没签。必须配一个"启动补一次"，
+    并且用"今天有没有 DONE 记录"判断该不该补，否则每次重启都会多签一遍
+16. **失败不重试才看得见失败**：给定时任务加自动重试，会把"连续 3 天成功"验收里的那一天悄悄补上，
+    于是你永远不知道它当晚失败过。重试要么不做，要么单独记录"第几次尝试"
 
 **维护记录**
 
@@ -663,3 +720,16 @@ java -jar target\HoyoAgent-0.0.1-SNAPSHOT.jar "--spring.config.import=optional:f
   Agent/Chat 双模式对话、工具调用 chips、原始 JSON 调试面板；
   后端新增 `GET /api/auth/status`（userId / source / uid / 掩码 mid / token 有无，不含凭据值）。
   验证：headless 截图渲染正常，静态资源与接口均 200。
+- 2026-11-13 P9-8 定时签到：新增 `CheckinScheduler`（`@Scheduled` 00:10 + `ApplicationReadyEvent`
+  后虚拟线程补签 + `ReentrantLock` 防重入）、`CheckinRecord`、`CheckinRecordStore`
+  （`~/.hoyo/checkin/YYYY-MM-DD.json`，原子写，读坏当没有）；`CheckinService` 的
+  `RoleResult` / `Summary` 带上 `ErrorKind`（从 `MihoyoError` 透传，读角色失败时按 9xxx 码回推），
+  失败不再只能靠中文文案区分；新增 `@EnableScheduling`、`GET /api/checkin/status`、
+  `POST /api/checkin/run`；调试页多一块「每日签到」（今日结果 + 最近 7 天 + 下次时间）。
+  配置项 `hoyo.checkin.{enabled,cron,zone,startup-delay,dir}` 进 `.env.example`。
+  验证：单测 59 条全绿（新增 `CheckinRecordStoreTest` 6 条、`CheckinSchedulerTest` 15 条）。
+  真机三跑（2026-11-13）：`startup-delay=60s` 启动 → `[CHECKIN] 完成 STARTUP：3 个角色：新签 0，已签 3`
+  → 记录 `DONE`；同进程再 `POST /api/checkin/run` 打日志"今天已经签过，未重复请求"；重启后
+  `[CHECKIN] 今天已签过（…），跳过 STARTUP`（没有发请求）；把 `hoyo.hosts.takumi` 指到不可达端口复现失败
+  → `ERROR [CHECKIN][ALERT] STARTUP 签到FAILED：读取绑定角色失败：米游社请求失败（kind=UNKNOWN）`，
+  `GET /api/checkin/status` 的 `needsAttention=true`、`attention` 给出人话原因。调试页截图核对过。
