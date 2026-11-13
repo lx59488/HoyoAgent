@@ -1,6 +1,5 @@
 package com.luobo.hoyoagent.mihoyo.credential;
 
-import com.luobo.hoyoagent.mihoyo.auth.CookieParser;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
@@ -51,7 +50,7 @@ public class CredentialStore {
             if (cookie.isBlank()) {
                 return Optional.empty();
             }
-            Credential parsed = CookieParser.parse(cookie);
+            Credential parsed = Credential.of(cookie);
             return Optional.of(new Credential(
                     parsed.cookies(),
                     kv.getOrDefault("uid", parsed.uid()),

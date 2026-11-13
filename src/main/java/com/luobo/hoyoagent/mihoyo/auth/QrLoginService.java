@@ -107,7 +107,7 @@ public class QrLoginService {
                 || current.mid() == null || current.mid().isBlank()) {
             throw new BusinessException(ErrorCode.MOYO_AUTH_EXPIRED, "当前凭据缺少 stoken/mid，请重新扫码绑定");
         }
-        Map<String, String> v2 = passport.exchangeV2(current.stoken(), current.mid());
+        CookieJar v2 = passport.exchangeV2(current.stoken(), current.mid());
         CookieJar merged = current.cookies().merge(v2);
         credentials.update(current.withCookies(merged));
         return new RefreshResult(merged.has("ltoken_v2"), merged.has("cookie_token_v2"),
@@ -139,7 +139,7 @@ public class QrLoginService {
         PassportClient.TokenResult cookieToken = passport.getCookieTokenByStoken(stoken, mid, aid);
 
         // v2 换取可能被风控拦；失败也先绑定，签到用 v1 cookie_token 就能跑
-        Map<String, String> v2 = Map.of();
+        CookieJar v2 = CookieJar.empty();
         try {
             v2 = passport.exchangeV2(stoken, mid);
         } catch (BusinessException e) {

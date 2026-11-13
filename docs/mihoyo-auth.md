@@ -468,7 +468,7 @@ GET  {host}/event/luna/home?lang=zh-cn&act_id=..     ← 奖励名（可选，�
 |---|---|
 | `mihoyo/sign/DsSigner.java` | DS1（`t,r,md5`）与 DS2（带 `b`/`q`）；旧的 `Signer` 已删除，统一入口 |
 | `mihoyo/auth/passport/PassportDevice.java` | 持久化 16 位 hex `device_id` + `device_fp`（`~/.hoyo/passport-device`） |
-| `mihoyo/auth/passport/PassportClient.java` | 建码 / 轮询 / 换 ltoken / 换 cookie_token / **v2 换取**；两套头各自封装 |
+| `mihoyo/auth/passport/PassportClient.java` | 建码 / 轮询 / 换 ltoken / 换 cookie_token / **v2 换取**；三套头（`QR_APP`/`QR_WEB`/`EXCHANGE`）都走 `MihoyoHttp`，Set-Cookie 从响应取、不存共享字段 |
 | `mihoyo/auth/QrLoginService.java` | 状态机 `WAITING→SCANNED→BOUND`，换票只做一次，3 分钟过期；`refreshV2()` 静默续期 |
 | `mihoyo/auth/CredentialStore.java` | 写 `~/.hoyo/credential.properties`（明文，owner-only） |
 | `mihoyo/auth/CredentialProvider.java` | 启动优先级：**带 stoken 的文件 > `.env`** |

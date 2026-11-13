@@ -11,6 +11,15 @@ package com.luobo.hoyoagent.mihoyo.credential;
  */
 public record Credential(CookieJar cookies, String uid, String mid, String stoken) {
 
+    /** 解析 cookie 头的唯一入口（uid/mid/stoken 的回退顺序也在这里定义）。 */
+    public static Credential of(String cookieHeader) {
+        CookieJar jar = CookieJar.of(cookieHeader);
+        return new Credential(jar,
+                firstPresent(jar, "ltuid_v2", "ltuid", "account_id_v2", "account_id", "stuid"),
+                firstPresent(jar, "ltmid_v2", "mid", "account_mid_v2"),
+                firstPresent(jar, "stoken", "stoken_v2"));
+    }
+
     public static Credential empty() {
         return new Credential(CookieJar.empty(), null, null, null);
     }
@@ -37,6 +46,16 @@ public record Credential(CookieJar cookies, String uid, String mid, String stoke
                 + ", mid=" + mask(mid)
                 + ", stoken=" + (hasStoken() ? "present" : "absent")
                 + ", cookies=" + (cookieHeader().isBlank() ? "none" : "***") + "]";
+    }
+
+    private static String firstPresent(CookieJar jar, String... names) {
+        for (String name : names) {
+            String value = jar.get(name).orElse(null);
+            if (value != null && !value.isBlank()) {
+                return value;
+            }
+        }
+        return null;
     }
 
     private static String mask(String value) {

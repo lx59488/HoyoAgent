@@ -1,6 +1,5 @@
 package com.luobo.hoyoagent.mihoyo.credential;
 
-import com.luobo.hoyoagent.mihoyo.auth.CookieParser;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -9,8 +8,9 @@ import org.springframework.stereotype.Component;
 /**
  * 凭据来源：扫码写入的文件优先（它带 stoken），否则回落到 {@code .env} 里手填的 cookie。
  *
- * <p>优先级不是随手定的：手填的 cookie 通常只有 ltoken，而签到必须有 stoken。如果反过来让
- * {@code .env} 永远优先，用户扫码一次、重启后又退回旧凭据，会非常难受。
+ * <p>优先级不是随手定的：手填的 cookie 通常只有 ltoken，而签到用的是 cookie_token
+ * （查战绩还需要 v2）。如果反过来让 {@code .env} 永远优先，用户扫码一次、重启后又退回旧凭据，
+ * 会非常难受。
  */
 @Component
 public class CredentialProvider {
@@ -25,7 +25,7 @@ public class CredentialProvider {
 
     public CredentialProvider(@Value("${hoyo.cookie:}") String rawCookie, CredentialStore store) {
         this.store = store;
-        Credential fromEnv = CookieParser.parse(rawCookie);
+        Credential fromEnv = Credential.of(rawCookie);
         Credential fromFile = store.load().orElse(null);
 
         if (fromFile != null && fromFile.hasStoken()) {

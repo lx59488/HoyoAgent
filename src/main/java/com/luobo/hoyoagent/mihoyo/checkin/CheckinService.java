@@ -89,7 +89,7 @@ public class CheckinService {
 
         MihoyoResult sign = luna.sign(game, role.region(), role.gameUid());
         if (sign.retcode() != 0) {
-            return fail(game, role, translate(sign.retcode()), days);
+            return fail(game, role, sign.error().userMessage(), days);
         }
         if (sign.data().path("success").asInt(0) != 0) {
             return new RoleResult(game.gameBiz(), game.displayName(), role.gameUid(), role.region(),
@@ -127,15 +127,6 @@ public class CheckinService {
         } catch (RuntimeException e) {
             return "";
         }
-    }
-
-    private static String translate(int retcode) {
-        return switch (retcode) {
-            case -100, 10001 -> "登录状态失效（-100），请重新扫码绑定";
-            case -500004 -> "请求太频繁（-500004），过一会儿再试";
-            case 1034 -> "需要人机验证（1034），去 App 手动签一次";
-            default -> "米游社返回异常 retcode=" + retcode;
-        };
     }
 
     private static RoleResult fail(CheckinGame game, GameRole role, String message, int days) {

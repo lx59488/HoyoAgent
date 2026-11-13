@@ -629,7 +629,13 @@ java -jar target\HoyoAgent-0.0.1-SNAPSHOT.jar "--spring.config.import=optional:f
      并加 `LunaInfoTest` 锁住 null / missing / true 三种形态。
   冒烟结果：8/8（默认 profile，`scripts/smoke-agent.ps1`）。
 - 2026-11-12 重构（Step 6/7）：`RecordClient` 接上身份并复用 `MihoyoHttp`；删除
-  `MiyousheApi` 与 `MihoyoHttpClient`（`new OkHttpClient` 从 3 处降到 2 处）；新增
+  `MiyousheApi` 与 `MihoyoHttpClient`（`new OkHttpClient` 从 3 处降到 2 处，次日再降到 1）；新增
   `PlayerService` 把「角色发现 + 战绩查询」从工具层挪到服务层；`/agent`、`/chat` 统一为
   `Result<T>` 封皮（冒烟脚本同步改动）；`HoyoProperties` 只留 `hosts/timeout/deviceId`，
   UA/版本/盐交给 `Profiles`。
+- 2026-11-13 收尾：`PassportClient` 并入 `MihoyoHttp`（`new OkHttpClient` 降到 **1 处**），
+  删掉 `lastSetCookies` 共享字段——v2 换取直接从 `MihoyoResult.headers()` 读 `Set-Cookie`，
+  并发 refresh 不再可能串号；`Profiles` 补 `QR_APP`/`QR_WEB`（扫码系 client_type 3/2 的差别显式化）；
+  删除 `CookieParser`，cookie 解析统一到 `Credential.of` / `CookieJar`；
+  新增 `PassportV2ExchangeTest`（MockWebServer + `hoyo.hosts.passport` 覆盖）、`CookieJarTest`、`CredentialTest`。
+  验证：单测 30 条、network 6 条、`/api/auth/refresh` 与三游戏签到真机跑通。
