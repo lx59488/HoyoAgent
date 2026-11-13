@@ -286,6 +286,23 @@ public interface CredentialCipher {
 
 密钥轮换时，留一个 `keyVersion` 字段，新数据用新密钥、旧数据惰性迁移。
 
+### 当前存储实现（2026-11-13）
+
+| 项 | 值 |
+|---|---|
+| 抽象 | `AccountStore`（`find/save/delete/list`）+ `FileAccountStore` |
+| 布局 | `~/.hoyo/accounts/<sha256(userId) 前 16 位>.account`，每用户一个文件 |
+| 原子性 | 每文件独立「临时文件 + ATOMIC_MOVE」，改一个账号不重写其他账号 |
+| 读取优先级 | `AccountStore` → 旧 `~/.hoyo/credential.properties`（**只读兜底**）→ `.env` |
+| 迁移 | 不做破坏性迁移：登录/刷新时写入新目录，旧文件保留，可手动删除 |
+| 加密 | ❌ 尚未实现（下一步接 `CredentialCipher`） |
+| 权限 | POSIX 设 `rw-------`；Windows 依赖用户目录继承 ACL（管理员仍可读） |
+| 多用户 | `hoyo.user-id`（默认 `local`）已预留，但解析仍是单例——见 §7 |
+
+> 为什么不是「一个全局文件」：每用户一个文件删账号=删文件，爆炸半径小；
+> 为什么不是数据库：单用户阶段没有事务/查询需求。等签到记录要落库时再换 `JdbcAccountStore`，
+> 上层不用动——这正是现在抽 `AccountStore` 的目的。
+
 ---
 
 ## 7. 与 Agent 记忆系统的关系（你问的核心）

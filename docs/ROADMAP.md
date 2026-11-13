@@ -59,7 +59,7 @@ com.luobo.hoyoagent
     │   ├── HeaderProfile.java         ← 一套头 = 一个值（salt 与版本锁在一起）
     │   └── Profiles.java              ← 扫码 / 换票 / 签到 / 战绩 四套头
     ├── error/MihoyoError.java         ← retcode 唯一映射：kind + 中文文案 + ErrorCode
-    ├── credential/                    ← CookieJar / Credential / Store / Provider
+    ├── credential/                    ← AccountStore(File) / CookieJar / Credential / Provider（旧文件只读兜底）
     ├── auth/                          ← QrLoginService + passport/{PassportClient,PassportDevice}
     ├── record/RecordClient.java       ← 绑定角色 / App 配置（character/list 已删除）
     ├── checkin/                       ← CheckinGame / LunaClient / CheckinService
@@ -415,7 +415,8 @@ P6-3 的真实角色输出保留为历史证据；「自然语言 → 真实数�
 
 ## P8 · 工程化与扩展（选做）
 
-- [ ] 多账号：`Credential` 从「一个」变成「一组」
+- [ ] 多账号：`AccountStore` 已就位（每用户一个 `.account` 文件），还差
+  `@ToolMemoryId → userId → 凭据` 的解析与存储加密
 - [ ] 重试与降级：限流类指数退避，登录类不重试
 - [ ] 可观测：Micrometer 打点，替换掉 `ToolCallRecorder`
 - [ ] 测试：录制一次真实响应存 JSON，回放跑工具测试（不依赖网络）
@@ -644,3 +645,9 @@ java -jar target\HoyoAgent-0.0.1-SNAPSHOT.jar "--spring.config.import=optional:f
   删除 `CookieParser`，cookie 解析统一到 `Credential.of` / `CookieJar`；
   新增 `PassportV2ExchangeTest`（MockWebServer + `hoyo.hosts.passport` 覆盖）、`CookieJarTest`、`CredentialTest`。
   验证：单测 30 条、network 5 条、`/api/auth/refresh` 与三游戏签到真机跑通。
+- 2026-11-13 存储抽象：新增 `AccountStore` + `FileAccountStore`（每用户一个 `.account` 文件，
+  文件名 = `sha256(userId)` 前 16 位，不泄露平台账号；原子写；POSIX 权限）。
+  `LegacyCredentialFile` 只读兜底旧 `credential.properties`（不迁移、不删除，可手动移除）；
+  `CredentialProvider` 改为按 `hoyo.user-id`（默认 `local`）解析。
+  验证：启动 `source=legacy` → 刷新后写入 `~/.hoyo/accounts/` → 重启 `source=store`，
+  签到与 refresh 正常；单测 38 条。
