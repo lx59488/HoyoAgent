@@ -87,6 +87,11 @@ public class CredentialProvider {
         return userId;
     }
 
+    /** 当前凭据来源，调试用（store / legacy / env / qr-login …）。 */
+    public String source() {
+        return source;
+    }
+
     /** 扫码登录 / v2 刷新成功后调用：先换内存，再落盘。 */
     public void update(Credential fresh) {
         this.credential = fresh;

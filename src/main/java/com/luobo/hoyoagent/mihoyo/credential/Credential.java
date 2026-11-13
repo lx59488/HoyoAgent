@@ -36,6 +36,11 @@ public record Credential(CookieJar cookies, String uid, String mid, String stoke
         return cookies.has(cookieName);
     }
 
+    /** 给接口/日志回显用，只保留后 4 位。 */
+    public String midMasked() {
+        return mask(mid);
+    }
+
     public Credential withCookies(CookieJar fresh) {
         return new Credential(fresh, uid, mid, stoken);
     }

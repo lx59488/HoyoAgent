@@ -9,6 +9,8 @@ import com.luobo.hoyoagent.common.exception.BusinessException;
 import com.luobo.hoyoagent.common.exception.ErrorCode;
 import com.luobo.hoyoagent.common.result.Result;
 import com.luobo.hoyoagent.mihoyo.auth.QrLoginService;
+import com.luobo.hoyoagent.mihoyo.credential.Credential;
+import com.luobo.hoyoagent.mihoyo.credential.CredentialProvider;
 import com.luobo.hoyoagent.mihoyo.dto.GameRole;
 import com.luobo.hoyoagent.mihoyo.role.GameRoleService;
 import org.springframework.http.CacheControl;
@@ -44,9 +46,28 @@ public class AuthController {
 
     private final GameRoleService roleService;
 
-    public AuthController(QrLoginService qrLogin, GameRoleService roleService) {
+    private final CredentialProvider credentials;
+
+    public AuthController(QrLoginService qrLogin, GameRoleService roleService, CredentialProvider credentials) {
         this.qrLogin = qrLogin;
         this.roleService = roleService;
+        this.credentials = credentials;
+    }
+
+    /** 当前绑定状态（给调试页用；不含任何凭据值）。 */
+    @GetMapping("/status")
+    public Result<AuthStatus> status() {
+        Credential credential = credentials.get();
+        return Result.success(new AuthStatus(
+                credentials.userId(),
+                credentials.source(),
+                credential.uid(),
+                credential.midMasked(),
+                credentials.isPresent(),
+                credential.hasStoken(),
+                credential.has("ltoken"),
+                credential.has("ltoken_v2"),
+                credential.has("cookie_token") || credential.has("cookie_token_v2")));
     }
 
     @PostMapping("/qr")
@@ -93,5 +114,16 @@ public class AuthController {
         } catch (Exception e) {
             throw new BusinessException(ErrorCode.INTERNAL_ERROR, "二维码渲染失败");
         }
+    }
+
+    public record AuthStatus(String userId,
+                             String source,
+                             String uid,
+                             String mid,
+                             boolean bound,
+                             boolean hasStoken,
+                             boolean hasLtoken,
+                             boolean hasLtokenV2,
+                             boolean hasCookieToken) {
     }
 }

@@ -497,7 +497,7 @@ GET  {host}/event/luna/home?lang=zh-cn&act_id=..     ← 奖励名（可选，�
 | `mihoyo/checkin/LunaClient.java` | `info` / `sign` / `home`，签到头 + DS1 |
 | `mihoyo/checkin/CheckinService.java` | `info → sign → info` 复验、`first_bind`、验证码、retcode 翻译 |
 | `agent/tool/CheckinTool.java` | Agent 工具：`checkinToday()`（无身份参数） |
-| `adapter/http/AuthController.java` | 建码 / 轮询 / PNG / `GET /api/auth/roles` / `POST /api/auth/refresh` |
+| `adapter/http/AuthController.java` | 建码 / 轮询 / PNG / `GET /api/auth/status` / `roles` / `POST /api/auth/refresh` |
 | `adapter/http/CheckinController.java` | `POST /api/checkin`（手动触发） |
 | `scripts/login-qr.ps1` | 一条命令走完：建码 → 存 PNG → 轮询到 BOUND |
 

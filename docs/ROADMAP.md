@@ -79,6 +79,11 @@ src/test/java/...
 ├── mihoyo/auth/CookieParserTest.java
 └── mihoyo/auth/passport/PassportDeviceTest.java / PassportClientTest.java
 
+src/main/resources/static/               ← 调试页（零构建、无 CDN）
+├── index.html                           ← 扫码绑定 + 对话 + 调试面板
+├── style.css
+└── app.js
+
 scripts/smoke-agent.ps1                ← 冒烟脚本（8 条用例，2026-11-07 重写）
 scripts/login-qr.ps1                   ← P9：建码 → 存 PNG → 轮询到 BOUND
 scripts/round1.md / round2.md          ← P3 两轮原始输出（历史证据，只读）
@@ -88,8 +93,10 @@ docs/ROADMAP.md                        ← 本文件
 docs/mihoyo-auth.md                    ← 登录/多用户设计稿；A/B 已落地（P9）
 ```
 
-接口：`GET /chat?q=`（纯问答）、`GET /agent?q=`（带工具，返回 `{code, message, data:{reply, toolsCalled}}`）、
-`POST /api/auth/qr` + `GET /api/auth/qr/{ticket}`（扫码绑定）、`POST /api/checkin`（手动签到）
+接口：`GET /`（调试页：扫码绑定 + 对话）、`GET /chat?q=`（纯问答）、
+`GET /agent?q=`（带工具，返回 `{code, message, data:{reply, toolsCalled}}`）、
+`POST /api/auth/qr` + `GET /api/auth/qr/{ticket}`（扫码绑定）、`GET /api/auth/status`（绑定状态）、
+`POST /api/checkin`（手动签到）
 
 **结构决策**：原计划放 `adapter.mihoyo`，实际改为顶层 `mihoyo/`。原因是后续会有多个入站适配器（http / onebot / console），把「外部系统客户端」提到顶层更好表达边界。约定：**`adapter` 只表示入站，`mihoyo` 表示出站**。
 
@@ -651,3 +658,8 @@ java -jar target\HoyoAgent-0.0.1-SNAPSHOT.jar "--spring.config.import=optional:f
   `CredentialProvider` 改为按 `hoyo.user-id`（默认 `local`）解析。
   验证：启动 `source=legacy` → 刷新后写入 `~/.hoyo/accounts/` → 重启 `source=store`，
   签到与 refresh 正常；单测 38 条。
+- 2026-11-13 调试页：新增 `src/main/resources/static/{index.html,style.css,app.js}`
+  （零构建、同源、无 CDN）。支持扫码绑定/轮询/倒计时、v2 刷新、绑定角色、
+  Agent/Chat 双模式对话、工具调用 chips、原始 JSON 调试面板；
+  后端新增 `GET /api/auth/status`（userId / source / uid / 掩码 mid / token 有无，不含凭据值）。
+  验证：headless 截图渲染正常，静态资源与接口均 200。

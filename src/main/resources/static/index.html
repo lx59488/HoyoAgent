@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>HoyoAgent 调试台</title>
+    <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<header class="topbar">
+    <div class="brand">
+        <span class="logo">H</span>
+        <div>
+            <h1>HoyoAgent 调试台</h1>
+            <p>扫码绑定 · 和 Agent 对话</p>
+        </div>
+    </div>
+    <div class="topbar-right">
+        <span id="conn" class="pill pill-muted">连接中…</span>
+        <span id="account-pill" class="pill pill-muted">未绑定</span>
+    </div>
+</header>
+
+<main class="layout">
+    <section class="card">
+        <div class="card-head">
+            <h2>账号绑定</h2>
+            <button id="btn-status" class="ghost" type="button">刷新状态</button>
+        </div>
+
+        <div id="account-detail" class="detail hidden"></div>
+
+        <div id="qr-area" class="qr-area hidden">
+            <div class="qr-frame">
+                <img id="qr-img" alt="米游社登录二维码">
+            </div>
+            <div class="qr-meta">
+                <span id="qr-state" class="pill pill-muted">等待扫码</span>
+                <span id="qr-countdown" class="muted"></span>
+            </div>
+            <p id="qr-msg" class="hint">用米游社 App 扫码并确认（3 分钟内有效）</p>
+        </div>
+
+        <div class="actions">
+            <button id="btn-qr" class="primary" type="button">获取登录二维码</button>
+            <button id="btn-refresh" class="secondary" type="button" disabled>刷新 v2 凭据</button>
+            <button id="btn-roles" class="ghost" type="button" disabled>查看绑定角色</button>
+        </div>
+
+        <div id="roles-box" class="roles hidden">
+            <h3>绑定角色</h3>
+            <ul id="roles"></ul>
+        </div>
+    </section>
+
+    <section class="card chat">
+        <div class="card-head">
+            <h2>对话</h2>
+            <div class="segmented" role="tablist" aria-label="对话模式">
+                <button class="seg active" data-mode="agent" type="button">Agent（工具）</button>
+                <button class="seg" data-mode="chat" type="button">Chat（纯模型）</button>
+            </div>
+        </div>
+
+        <div id="messages" class="messages" aria-live="polite"></div>
+
+        <div class="suggestions">
+            <button type="button" data-prompt="帮我签个到">帮我签个到</button>
+            <button type="button" data-prompt="今天签到了吗">今天签到了吗</button>
+            <button type="button" data-prompt="我树脂还剩多少">我树脂还剩多少</button>
+            <button type="button" id="btn-clear" class="ghost">清空对话</button>
+        </div>
+
+        <form id="composer" class="composer">
+            <textarea id="input" rows="1" placeholder="问点什么…… Enter 发送，Shift+Enter 换行"></textarea>
+            <button id="btn-send" class="primary" type="submit">发送</button>
+        </form>
+    </section>
+</main>
+
+<details class="debug" id="debug">
+    <summary>调试面板（最近一次请求 / 响应）</summary>
+    <div class="debug-grid">
+        <div>
+            <h3>请求</h3>
+            <pre id="debug-req">—</pre>
+        </div>
+        <div>
+            <h3>响应</h3>
+            <pre id="debug-res">—</pre>
+        </div>
+    </div>
+</details>
+
+<script src="/app.js"></script>
+</body>
+</html>
