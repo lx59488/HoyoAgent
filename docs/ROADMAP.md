@@ -18,7 +18,7 @@
 | P3 | 多工具与工具设计 | 10 条用例命中 ≥ 8 | 1 天 | ✅ 完成（7/10 → 8/10）<br>⚠️ 用例表已被 P6 作废 |
 | P4 | 米游社客户端基线 | 控制台打印真实 uid | 2~3 天 | ✅ 完成（错误场景未验） |
 | P5 | 数据契约与错误治理 | 脱敏 + 限流 + DTO | 1~2 天 | 未开始 |
-| P6 | 接入真实数据 | 自然语言查真实战绩 | 半天 | 🚧 2 个工具（角色/签到）；角色查询受 `5003` 限制 |
+| P6 | 接入真实数据 | 自然语言查真实战绩 | 半天 | ⚠️ 已回退：`character/list` 与 `PlayerTool` 于 11-13 删除，能力由 P9 签到承接 |
 | P7 | 记忆与多轮 | 多轮对话不丢上下文 | 1 天 | 未开始 |
 | P8 | 工程化扩展（选做） | 多账号 / 可观测 / MCP | 长期 | 未开始 |
 | P9 | 登录与签到 | 扫码拿 stoken，能签当天 | 2~3 天 | 🚧 登录+签到已通，缺定时调度 |
@@ -43,13 +43,12 @@ com.luobo.hoyoagent
 │   └── http/
 │       ├── ChatController.java        ← P1：纯模型问答（对照组）
 │       ├── AgentController.java       ← P2：走 AiService，回传 toolsCalled
-│       ├── AuthController.java        ← P9：扫码登录 + 角色列表 + v2 刷新
+│       ├── AuthController.java        ← P9：扫码登录 + 绑定角色 + v2 刷新
 │       └── CheckinController.java     ← P9：POST /api/checkin
 ├── agent/
 │   ├── MihoyoAssistant.java           ← @AiService 接口（无实现，运行时动态代理）
 │   ├── observability/ToolCallRecorder.java
 │   └── tool/
-│       ├── PlayerTool.java            ← P6：真数据；角色 uid 改为自动发现（P9）
 │       ├── CheckinTool.java           ← P9：每日签到（无身份参数）
 │       └── DecoyTool.java             ← @Profile("decoy") 诱饵，只用于测能力边界
 └── mihoyo/                            ← 外部系统客户端（与 agent 完全解耦）
@@ -62,13 +61,11 @@ com.luobo.hoyoagent
     ├── error/MihoyoError.java         ← retcode 唯一映射：kind + 中文文案 + ErrorCode
     ├── credential/                    ← CookieJar / Credential / Store / Provider
     ├── auth/                          ← QrLoginService + passport/{PassportClient,PassportDevice}
-    ├── record/RecordClient.java       ← 绑定角色 / 角色列表 / App 配置
+    ├── record/RecordClient.java       ← 绑定角色 / App 配置（character/list 已删除）
     ├── checkin/                       ← CheckinGame / LunaClient / CheckinService
-    ├── player/PlayerService.java      ← 角色发现 + 战绩查询的组合（工具层只负责措辞）
     ├── role/GameRoleService.java      ← 角色自动发现（10 分钟缓存）
     ├── client/DeviceIdProvider.java   ← 持久化 device_id（配置 > ~/.hoyo/device-id > 生成）
     ├── dto/GameRole.java              ← 绑定角色
-    ├── dto/CharacterDto.java          ← ⚠️ 用 Jackson 2 注解，见附录 C 坑 3
     ├── enums/{MiyousheHost,GameBiz}   ← host 与 game_biz 常量
     ├── MihoyoEndpoints.java           ← host 覆盖入口（hoyo.hosts 可改 base url）
     ├── sign/DsSigner.java             ← DS1 / DS2 公式与 md5（唯一签名入口）
@@ -314,7 +311,8 @@ P6 接真数据时才发现一个当初没意识到的事：**假数据把「查
 - [ ] P4-9 retcode 映射表补全：现有 5 条（-100/10001/-5003/10101/1034）**全是假设**，必须实测
 - [ ] P4-10 三种错误场景各验证一次：错 cookie、过期 cookie、断网
 - [ ] P4-11 离线单测：`Signer` 固定输入 → 固定输出；`CookieParser` 各种脏输入
-- [ ] **P4-13 `CharacterDto` 的字段映射从未验证过**：`RecordClientTest` 只打印了 `name` 和 `level`，`actived_constellation_num` → `constellation` 这条没人看过。而小号角色命座全是 0，测了也分不出"映射成功"和"没映射上"。做法：录一份真实响应存 `src/test/resources/fixtures/`，写离线断言——顺手就把 P8 的回放测试开了头
+- [x] ~~P4-13 `CharacterDto` 的字段映射从未验证过~~ —— **作废**：`CharacterDto` 与 `character/list`
+  已于 2026-11-13 删除，字段映射不再有消费方
 
 ### 已修复
 
@@ -358,8 +356,10 @@ P6 接真数据时才发现一个当初没意识到的事：**假数据把「查
 **目标**：把假工具换成真客户端。~~**`@AiService` 接口和工具签名应该一行都不用改。**~~
 **结果**：这句话是错的，而且错得很有价值——见下面 P6-4 复盘。
 
-**现状（2026-11-12）**：纵向切片通了，现在有 2 个真数据工具（`PlayerTool` 角色 / `CheckinTool` 签到）。
-「自然语言 → 真实数据 → 中文回答」全链路已验证。角色查询在换号后受米游社 `5003` 限制（见 P9-10）。
+**现状（2026-11-13）**：`character/list` 与 `PlayerTool` / `PlayerService` / `CharacterDto` 已删除。
+原因：FufuLauncher 没有这个接口的实现可对照；新账号上恒返回 `5003`（旧账号同请求正常，已确认账号侧）；
+它也不再是产品需要的能力。Agent 现在只剩 `CheckinTool`（P9）。
+P6-3 的真实角色输出保留为历史证据；「自然语言 → 真实数据」的闭环仍在，由签到承接。
 
 - [x] P6-1 假的 `DB` / `NOTES` / `ABYSS` 三张表和注释掉的 `@Tool` 已清除，`FakePlayerTool` 改名 `PlayerTool`
 - [ ] P6-2 确认 `MihoyoAssistant` 与工具签名零改动 —— **没做到，见 P6-4**
@@ -439,7 +439,8 @@ P6 接真数据时才发现一个当初没意识到的事：**假数据把「查
 - [x] P9-7b 角色自动发现（`GameRoleService`），替掉写死的 `HOYO_ROLE_ID`
 - [ ] P9-8 `@Scheduled` 每天 00:10 + 当日记录幂等（先文件，多用户再上库）
 - [ ] P9-9 stoken 失效时主动提示重新扫码（`/api/auth/refresh` 失败 → 通知）
-- [ ] P9-10 排查 `character/list` 的 `5003`（新账号不通、旧账号通；不是请求头问题）
+- [x] ~~P9-10 排查 `character/list` 的 `5003`~~ —— **已关闭**：该接口 11-13 删除；实验确认与请求头无关
+  （新账号四种头组合全 `5003`，旧账号同一套头 `retcode=0`）
 
 **验收**：连续 3 天自动签到成功，且 `~/.hoyo/credential.properties` 不用再动。
 
@@ -479,7 +480,7 @@ pwsh -NoProfile -File .\scripts\login-qr.ps1   # 终端 2
 | 战绩 cookie | `ltoken_v2`；只有 v1 会得到无 message 的 `5003` | 11-12 实测 |
 | 签到实测 | 星铁 `103871907`、绝区零 `15911914` 真签成功；原神 `100848866` 当日已签 | 11-12 |
 | `getAppConfig` 是否需要认证 | **不需要** cookie，也不需要 DS（伪造/缺失 DS 均返回 retcode 0） | 三种情况实测 |
-| `character/list` 是否需要认证 | **需要** cookie（ltoken）；**不需要** DS（salt 为空照样 retcode 0） | 2026-11-07 实测 |
+| `character/list` 是否需要认证 | **需要** cookie（ltoken）；**不需要** DS（salt 为空照样 retcode 0）。**该接口 11-13 已从项目删除** | 2026-11-07 实测 |
 | DS 输出格式 | `{t},{r},{md5}` | 抓包 + 文档 |
 | DS1 | `md5("salt={salt}&t={t}&r={r}")`，`r` = 6 位 `[A-Za-z0-9]` | 文档 + 抓包 |
 | DS2 | `md5("salt={salt}&t={t}&r={r}&b={body}&q={query}")`，`r` = 100000~200000 整数 | 文档 |
@@ -623,7 +624,7 @@ java -jar target\HoyoAgent-0.0.1-SNAPSHOT.jar "--spring.config.import=optional:f
   撞码（都是 `9006`，后者改为 `9007`）。角色 uid 改为自动发现后，`.env` 的 `HOYO_ROLE_ID`/`HOYO_SERVER` 已不读取。
 - 2026-11-12 修复（冒烟抓出来的两个真问题）：
   1) `MihoyoAssistant` 的 `SystemMessage` 仍写着"没有签到能力"，导致用户说「帮我签个到」时模型
-     直接拒绝；能力清单已改为「角色列表 + 每日签到」两项，冒烟第 6 条从负例改成正例。
+     直接拒绝；能力清单已补签到（11-13 又收窄为「只有签到」），冒烟第 6 条从负例改成正例。
   2) `LunaInfo.first_bind` 在已签到账号上是 `null`，原来用原始 `boolean` 接会反序列化失败
      （模型报"字段 first_bind 为 null"并重复调用工具）；改成 `Boolean` + `isFirstBind()`，
      并加 `LunaInfoTest` 锁住 null / missing / true 三种形态。
@@ -633,9 +634,13 @@ java -jar target\HoyoAgent-0.0.1-SNAPSHOT.jar "--spring.config.import=optional:f
   `PlayerService` 把「角色发现 + 战绩查询」从工具层挪到服务层；`/agent`、`/chat` 统一为
   `Result<T>` 封皮（冒烟脚本同步改动）；`HoyoProperties` 只留 `hosts/timeout/deviceId`，
   UA/版本/盐交给 `Profiles`。
-- 2026-11-13 收尾：`PassportClient` 并入 `MihoyoHttp`（`new OkHttpClient` 降到 **1 处**），
+- 2026-11-13 删除角色查询：`character/list` 没有参考实现可对照（FufuLauncher 的数据页用本地数据），
+  新账号上恒 `5003`、旧账号同请求正常（已确认账号侧），且产品不再需要。删除
+  `RecordClient.characters`、`CharacterDto`、`PlayerService`、`PlayerTool`；Agent 只剩
+  `CheckinTool`，`SystemMessage` 与冒烟用例同步收窄（8/8 通过）。
+- 2026-11-13 收尾（PassportClient 并入 MihoyoHttp）：`new OkHttpClient` 降到 **1 处**；
   删掉 `lastSetCookies` 共享字段——v2 换取直接从 `MihoyoResult.headers()` 读 `Set-Cookie`，
   并发 refresh 不再可能串号；`Profiles` 补 `QR_APP`/`QR_WEB`（扫码系 client_type 3/2 的差别显式化）；
   删除 `CookieParser`，cookie 解析统一到 `Credential.of` / `CookieJar`；
   新增 `PassportV2ExchangeTest`（MockWebServer + `hoyo.hosts.passport` 覆盖）、`CookieJarTest`、`CredentialTest`。
-  验证：单测 30 条、network 6 条、`/api/auth/refresh` 与三游戏签到真机跑通。
+  验证：单测 30 条、network 5 条、`/api/auth/refresh` 与三游戏签到真机跑通。

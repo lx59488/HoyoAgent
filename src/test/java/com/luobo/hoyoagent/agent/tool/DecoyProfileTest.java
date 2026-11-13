@@ -28,6 +28,6 @@ class DecoyProfileTest {
     void decoyProfileRegistersDecoyTools() {
         assertThat(ctx.getBeansOfType(DecoyTool.class)).hasSize(1);
         // 诱饵在、真工具也在，两者同时挂到同一个 AiService 上才是被测的真实局面
-        assertThat(ctx.getBeansOfType(PlayerTool.class)).hasSize(1);
+        assertThat(ctx.getBeansOfType(CheckinTool.class)).hasSize(1);
     }
 }

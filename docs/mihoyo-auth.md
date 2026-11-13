@@ -12,7 +12,7 @@
 
 现状（2026-11-07）：
 
-- ✅ 能查角色列表（`character/list`）、角色详情（`character/detail`）
+- ✅ 能查角色列表（`character/list`）、角色详情（`character/detail`）——**11-13 已移除该对接**，见 §12
 - ✅ 能查绑定角色（`getUserGameRolesByCookie`）
 - ❌ **没有 `stoken`**，所以签到走不通（实测 `luna/info` 恒返回 `-100`）
 - ❌ 单账号、凭据明文在 `.env`、无登录流程
@@ -86,6 +86,9 @@ cookie_token + account_id ────► 每日签到（luna）、部分接口�
   它确实值钱，只是不负责游戏签到。
 - 战绩接口（`character/list`、`dailyNote`）只认 **v2**（`ltoken_v2` / `cookie_token_v2`）。
   只有 v1 会返回无 message 的 `5003`——这个码极容易误判成"没权限"。
+
+> 上表中 `character/list` 的相关结论保留为历史证据：该接口已于 2026-11-13 从项目移除
+> （FufuLauncher 也无实现可对照，新账号恒 `5003`、旧账号同请求正常，判定为账号侧）。
 
 UIGF 文档的描述与之吻合：
 
@@ -180,7 +183,7 @@ Cookie: mid=<mid>; stoken=<stoken>; stuid=<uid>
 | 阶段 | 内容 | 预估 | 验收 | 状态（11-12） |
 |---|---|---|---|---|
 | **A** | 扫码登录拿到 `stoken` + `mid` | 1 天 | 两个值能打印出来，且用它们换到 ltoken | ✅ 真机扫码通过（`WAITING→SCANNED→BOUND`） |
-| **B** | `stoken` → `ltoken` / `cookie_token` / `*_v2` | 半天 | 用换到的 ltoken 成功查角色列表 | ✅ 全部换到；战绩查询受账号侧 `5003` 限制（见 §12） |
+| **B** | `stoken` → `ltoken` / `cookie_token` / `*_v2` | 半天 | 成功查到绑定角色（`getUserGameRolesByCookie`） | ✅ 全部换到；角色列表接口 11-13 删除 |
 | **C** | 多用户凭据存储（加密 + 按 userId 检索） | 1 天 | 两个账号的数据互不串 | 未开始 |
 | **D** | per-user 工具与记忆隔离 | 1 天 | 用户 A 问"我有哪些角色"，只返回 A 的 | 未开始（依赖 P7 的 `ChatMemory`） |
 | **E** | 签到调度（幂等 + 重试 + 通知） | 1 天 | 连续 3 天自动签到成功，不重复签 | 🚧 单角色签到 + 幂等已通；**调度/通知未做** |
@@ -493,21 +496,21 @@ GET  {host}/event/luna/home?lang=zh-cn&act_id=..     ← 奖励名（可选，�
 | 角色自动发现 | ✅ 7 个角色（原神/星铁/绝区零/崩坏3×4） |
 | `POST /api/checkin` | ✅ 星铁、绝区零真签成功；原神当日已签返回 `ALREADY` |
 | 幂等 | ✅ 同日重复调用不重复签 |
-| 单元测试（13 条）+ `PassportClientTest`（2 条）+ `LunaClientTest`（2 条） | 全绿 |
+| 单元测试（30 条）+ network（5 条） | 全绿（`5003` 用例已随角色接口删除） |
 
 ### 已知问题（不是代码 bug，但要知道）
 
-1. **`character/list` 仍返回 `5003`**（新账号，v2 凭据齐全，换过 device_fp / DS / web 头都不变）。
-   同一请求在旧账号上是通的，所以更可能是**账号侧的战绩可见性/风控**，不是请求构造问题。
-   代码里已经能把它当普通 `MOYO_API_ERROR` 返回给模型，不会崩。
-2. `5003` 没有 message，极难自行诊断。如果换账号也不通，下一步应该抓一次官方 App 的同请求对比头。
-3. **旧 `.env` 的 `HOYO_ROLE_ID=153383881` 属于另一个账号**，现在已不参与查询（改自动发现）。
+1. **`character/list` 已于 2026-11-13 从项目删除**（连同 `PlayerTool`/`PlayerService`/`CharacterDto`）。
+   原因：FufuLauncher 没有该接口的实现可对照；新账号上四种请求头组合全返 `5003`，
+   而旧账号同一套头 `retcode=0`——是账号侧（战绩可见性/同步），不是对接错误。
+   相关结论保留在 §2，仅作历史证据。
+2. **旧 `.env` 的 `HOYO_ROLE_ID=153383881` 属于另一个账号**，代码已不读取（改自动发现）。
 
 ### 下一步
 
 - P9-8：`@Scheduled` 每天 00:10 + 当日记录（先内存/文件，多用户再上 `checkin_records`）
 - P9-9：stoken 失效时主动提示重新扫码（`/api/auth/refresh` 失败 → 发通知）
-- 排查 `5003`：等风控冷却后用旧账号复测；若旧账号也变 5003，就是接口升级，需要抓包
+- 若以后要重做战绩查询：先按 `docs/ROADMAP.md` 维护记录补齐 record 头（fp/sys/tool/page/DS+sorted query）
 
 ---
 
