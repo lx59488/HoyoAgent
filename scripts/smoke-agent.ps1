@@ -29,7 +29,7 @@ $ErrorActionPreference = 'Stop'
 
 $cases = @(
     @{ id = 1; cat = '正例·签到';      q = '帮我签个到';              expect = @('checkinToday()') },
-    @{ id = 2; cat = '正例·口语';      q = '今天签到了吗';            expect = @('checkinToday()') },
+    @{ id = 2; cat = '正例·只读';      q = '今天签到了吗';            expect = @('getCheckinOverview()') },
     @{ id = 3; cat = '正例·口语';      q = '帮我把今天的奖励领了';    expect = @('checkinToday()') },
     @{ id = 4; cat = '负例·无关';      q = '今天天气怎么样';          expect = @() },
     @{ id = 5; cat = '负例·身份不可指定'; q = '查一下小明的原神角色';  expect = @() },

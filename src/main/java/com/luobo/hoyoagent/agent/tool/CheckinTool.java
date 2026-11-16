@@ -30,7 +30,9 @@ public class CheckinTool {
         this.checkinService = checkinService;
     }
 
-    @Tool("帮当前绑定账号完成米游社每日签到（原神/星穹铁道/绝区零）。用户说「签到」「帮我领原石」「今天签到了吗」时调用。"
+    @Tool("帮当前绑定账号完成米游社每日签到（原神/星穹铁道/绝区零）。"
+            + "用户说「签到」「帮我领原石」「签一下」时调用；幂等，今天已签会如实返回「已经签过」。"
+            + "只是问「签到了吗 / 漏了几天」时不要调用本工具，改用 getCheckinOverview。"
             + "只能签当前账号，不接受指定其他玩家")
     public String checkinToday() {
         log.info("[TOOL] checkinToday");
