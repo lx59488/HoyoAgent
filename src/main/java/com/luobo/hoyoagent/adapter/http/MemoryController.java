@@ -40,6 +40,7 @@ public class MemoryController {
     public Result<SessionView> peek(@PathVariable("sessionId") String sessionId) {
         List<ChatMessage> messages = memoryStore.snapshot(sessionId);
         return Result.success(new SessionView(sessionId, messages.size(),
+                memoryStore.expired(sessionId),
                 messages.stream().map(MemoryController::view).toList()));
     }
 
@@ -48,7 +49,7 @@ public class MemoryController {
     public Result<SessionView> clear(@PathVariable("sessionId") String sessionId) {
         memoryStore.deleteMessages(sessionId);
         assistant.evictChatMemory(sessionId);
-        return Result.success(new SessionView(sessionId, 0, List.of()));
+        return Result.success(new SessionView(sessionId, 0, false, List.of()));
     }
 
     private static MessageView view(ChatMessage message) {
@@ -77,7 +78,11 @@ public class MemoryController {
         return oneLine.length() <= 120 ? oneLine : oneLine.substring(0, 120) + "…";
     }
 
-    public record SessionView(String sessionId, int messages, List<MessageView> content) {
+    /**
+     * @param messages 窗口里的消息条数（也就是下一轮真正会发给模型的量）
+     * @param expired  已空闲超时：内容还看得见，但下一轮会被当作新会话
+     */
+    public record SessionView(String sessionId, int messages, boolean expired, List<MessageView> content) {
     }
 
     public record MessageView(String type, String text) {

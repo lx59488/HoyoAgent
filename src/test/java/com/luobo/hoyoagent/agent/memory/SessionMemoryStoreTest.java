@@ -32,6 +32,8 @@ class SessionMemoryStoreTest {
         assertThat(store.getMessages("nobody")).isEmpty();
         assertThat(store.snapshot("nobody")).isEmpty();
         assertThat(store.sessionIds()).isEmpty();
+        // 没有会话 ≠ 过期：前者是首次访问，后者要显示在调试页上
+        assertThat(store.expired("nobody")).isFalse();
     }
 
     @Test
@@ -139,6 +141,22 @@ class SessionMemoryStoreTest {
     }
 
     @Test
+    void expiredReportsIdleTimeoutWithoutTouchingTheSession() throws InterruptedException {
+        SessionMemoryStore store = store(200, Duration.ofMillis(80));
+        store.updateMessages("s1", List.<ChatMessage>of(UserMessage.from("hi")));
+
+        Thread.sleep(50);
+        assertThat(store.expired("s1")).isFalse();
+
+        // 看一眼调试接口不该续命：如果 expired() 里也调了 touch()，下面这句会变成 false
+        Thread.sleep(50);
+
+        assertThat(store.expired("s1")).isTrue();
+        // 但内容还在：调试页要能看见这条会话长什么样，同时知道它下一轮会被丢掉
+        assertThat(store.snapshot("s1")).hasSize(1);
+    }
+
+    @Test
     void snapshotIgnoresIdleTimeoutOnPurpose() throws InterruptedException {
         SessionMemoryStore store = store(200, Duration.ofMillis(10));
         store.updateMessages("s1", List.<ChatMessage>of(UserMessage.from("hi")));
@@ -147,7 +165,8 @@ class SessionMemoryStoreTest {
 
         // 注意顺序：先看 snapshot，再看 getMessages —— 后者会把会话删掉
         // 已知不对称：调试接口看得见，模型下一轮拿到的是空。
-        // 修法（给 SessionView 加 expired）之后，这个用例要跟着改，别忘了。
+        // 这个不对称不能靠改 snapshot 解决（看一眼就删会让调试页变成自毁按钮），
+        // 所以由 expired() 显式暴露，调试页据此显示"已过期"，而不是假装还有记忆。
         assertThat(store.snapshot("s1")).hasSize(1);
         assertThat(store.getMessages("s1")).isEmpty();
     }

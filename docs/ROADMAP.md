@@ -4,8 +4,9 @@
 > 用法：从上往下做，每完成一条把 `[ ]` 改成 `[x]`。每个阶段结束后打一个 git tag（`phase-1`、`phase-2`…）。
 > 设计原则：**先用假数据学 Agent，再接真实 API**。两条线并行、互不阻塞。
 
-**最后更新：2026-11-13**（P1~P6 纵向切片已通；P9 登录 / 签到 / 定时调度已落地，等连续 3 天自动签到的验收；
-P3 的 10 条用例表已作废，见 P3 后记）
+**最后更新：2026-11-16**（P7 会话层已落地，`smoke-memory.ps1` 4/4 通过；P7-3 仍卡在缺第二个工具；
+P9 的 3 天观察是 **0/3**——14~16 服务没在跑，且 11-16 签到凭据 `AUTH` 失效（疑为 cookie_token 单独过期，
+续期机制待验）；P3 的 10 条用例表已作废）
 
 ---
 
@@ -20,9 +21,9 @@ P3 的 10 条用例表已作废，见 P3 后记）
 | P4 | 米游社客户端基线 | 控制台打印真实 uid | 2~3 天 | ✅ 完成（错误场景未验） |
 | P5 | 数据契约与错误治理 | 脱敏 + 限流 + DTO | 1~2 天 | 未开始 |
 | P6 | 接入真实数据 | 自然语言查真实战绩 | 半天 | ⚠️ 已回退：`character/list` 与 `PlayerTool` 于 11-13 删除，能力由 P9 签到承接 |
-| P7 | 记忆与多轮 | 多轮对话不丢上下文 | 1 天 | 未开始 |
+| P7 | 记忆与多轮 | 多轮对话不丢上下文 | 1 天 | 🚧 会话层已落地（P7-1 / P7-2）；P7-3 卡在缺第二个工具 |
 | P8 | 工程化扩展（选做） | 多账号 / 可观测 / MCP | 长期 | 未开始 |
-| P9 | 登录与签到 | 扫码拿 stoken，能签当天 | 2~3 天 | 🚧 登录 / 签到 / 定时已通，待连续 3 天观察 |
+| P9 | 登录与签到 | 扫码拿 stoken，能签当天 | 2~3 天 | 🚧 3 天观察 **0/3**（14~16 服务未运行）；11-16 签到 `AUTH` 失效，续期机制待验（P9-11） |
 
 > **状态校准自 2026-11-07 的代码核对**：P4-5（DeviceIdProvider）、P4-12（关日志）、
 > P6 纵向切片其实都已完成，只是清单没跟上。**这份清单就是项目的单一事实来源，
@@ -42,12 +43,17 @@ com.luobo.hoyoagent
 │   └── result/Result.java
 ├── adapter/
 │   └── http/
-│       ├── ChatController.java        ← P1：纯模型问答（对照组）
-│       ├── AgentController.java       ← P2：走 AiService，回传 toolsCalled
+│       ├── ChatController.java        ← P1：纯模型问答（对照组，不挂工具也不挂记忆）
+│       ├── AgentController.java       ← P2/P7：走 AiService，X-Session-Id 定会话，回传 toolsCalled
 │       ├── AuthController.java        ← P9：扫码登录 + 绑定角色 + v2 刷新
+│       ├── MemoryController.java      ← P7：GET/DELETE /api/memory/{sessionId}（唯一观测口）
 │       └── CheckinController.java     ← P9：POST /api/checkin
 ├── agent/
-│   ├── MihoyoAssistant.java           ← @AiService 接口（无实现，运行时动态代理）
+│   ├── MihoyoAssistant.java           ← @AiService 接口（无实现，运行时动态代理）；extends ChatMemoryAccess
+│   ├── memory/                        ← P7：会话记忆（唯一状态在这里）
+│   │   ├── MemoryProperties.java      ← hoyo.memory.*；null / 非法值落默认值
+│   │   ├── SessionMemoryStore.java    ← ChatMemoryStore 实现：会话数上限 + 空闲 TTL + expired()
+│   │   └── MemoryConfig.java          ← ChatMemoryProvider（MessageWindowChatMemory，窗口 20 条）
 │   ├── observability/ToolCallRecorder.java
 │   └── tool/
 │       ├── CheckinTool.java           ← P9：每日签到（无身份参数）
@@ -76,6 +82,8 @@ com.luobo.hoyoagent
     └── config/HoyoProperties.java     ← @ConfigurationProperties(prefix = "hoyo")
 
 src/test/java/...
+├── agent/memory/SessionMemoryStoreTest.java ← 会话数上限 / 空闲 TTL / 删除 / 过期标记（11 条）
+├── agent/memory/MemoryPropertiesTest.java   ← 配置缺省与非法值兜底（3 条）
 ├── mihoyo/record/RecordClientTest.java    ← @Tag("network")，真实打米游社
 ├── mihoyo/transport/MihoyoHttpTest.java   ← MockWebServer：retcode/header/POST 语义
 ├── mihoyo/transport/MihoyoRequestTest.java← 空集合规整
@@ -84,11 +92,12 @@ src/test/java/...
 └── mihoyo/auth/passport/PassportDeviceTest.java / PassportClientTest.java
 
 src/main/resources/static/               ← 调试页（零构建、无 CDN）
-├── index.html                           ← 扫码绑定 + 对话 + 调试面板
+├── index.html                           ← 扫码绑定 + 对话 + 调试面板 + 新会话
 ├── style.css
-└── app.js
+└── app.js                               ← sessionId 存 localStorage，/agent 带 X-Session-Id
 
-scripts/smoke-agent.ps1                ← 冒烟脚本（8 条用例，2026-11-07 重写）
+scripts/smoke-agent.ps1                ← 冒烟脚本（8 条用例，2026-11-07 重写；每条用例一个独立会话）
+scripts/smoke-memory.ps1               ← P7：记忆差分验收（同会话不重复调 / 无会话必调 / 跨会话隔离 / 窗口不涨）
 scripts/login-qr.ps1                   ← P9：建码 → 存 PNG → 轮询到 BOUND
 scripts/round1.md / round2.md          ← P3 两轮原始输出（历史证据，只读）
 scripts/round3.md / round3-decoy.md    ← 新契约下两种 profile 的实测结果（均 8/8）
@@ -97,11 +106,13 @@ docs/ROADMAP.md                        ← 本文件
 docs/mihoyo-auth.md                    ← 登录/多用户设计稿；A/B 已落地（P9）
 ```
 
-接口：`GET /`（调试页：扫码绑定 + 对话）、`GET /chat?q=`（纯问答）、
-`GET /agent?q=`（带工具，返回 `{code, message, data:{reply, toolsCalled}}`）、
+接口：`GET /`（调试页：扫码绑定 + 会话对话）、`GET /chat?q=`（纯问答，对照组：无工具、无记忆）、
+`GET /agent?q=` + **请求头 `X-Session-Id`**（带工具，返回 `{code, message, data:{reply, toolsCalled, sessionId, messages}}`；
+不传头 = 一次性会话，请求结束即销毁，行为与加记忆之前一致）、
 `POST /api/auth/qr` + `GET /api/auth/qr/{ticket}`（扫码绑定）、`GET /api/auth/status`（绑定状态）、
 `POST /api/checkin`（裸调签到，不落盘）、`POST /api/checkin/run`（走调度路径，今天已签则跳过）、
-`GET /api/checkin/status`（今日结果 + 最近 7 天 + 是否该看一眼）
+`GET /api/checkin/status`（今日结果 + 最近 7 天 + 是否该看一眼）、
+`GET /api/memory/{sessionId}`（窗口内容 + `expired` 标记）、`DELETE /api/memory/{sessionId}`（清空会话）
 
 **结构决策**：原计划放 `adapter.mihoyo`，实际改为顶层 `mihoyo/`。原因是后续会有多个入站适配器（http / onebot / console），把「外部系统客户端」提到顶层更好表达边界。约定：**`adapter` 只表示入站，`mihoyo` 表示出站**。
 
@@ -405,23 +416,71 @@ P6-3 的真实角色输出保留为历史证据；「自然语言 → 真实数�
 
 ---
 
-## P7 · 记忆与多轮
+## P7 · 记忆与多轮 🚧
 
-> **开始前的提醒**：多轮的价值体现在「省略了主语也能接上」。
+> **开始前的提醒（2026-11-13 仍未解决）**：多轮的价值体现在「省略了主语也能接上」。
 > 当前只有 1 个无参工具，能测的是"你还记得刚才聊的是安柏吗"，
 > 测不了"那深渊呢"——因为深渊工具不存在。
 > 所以 P6-6/P6-7 至少补回一个工具，P7 的实验才立得住。
 
-- [ ] P7-1 接入 `ChatMemory`（`MessageWindowChatMemory` / `TokenWindowChatMemory`）
-- [ ] P7-2 会话隔离：按 userId 分配独立 memory
-- [ ] P7-3 多轮验收：「我在查原神」→「那深渊呢」，模型理解省略的主语
-- [ ] P7-4 设置窗口上限，验证连续 30 轮不爆 token
-- [ ] P7-5 观察一次记忆裁剪，理解丢了什么
+**现状**：会话层已落地（`agent/memory` + `X-Session-Id`），P7-3 依然写不出验收——
+**卡的不是记忆，是第二个工具**。这条从 11-07 看到现在，一直没变，别再往后拖。
+
+- [x] P7-1 接入 `ChatMemory`：`ChatMemoryProvider` + `MessageWindowChatMemory(20)`，`@AiService` 注解零改动
+- [x] P7-2 会话隔离：`@MemoryId` 当不透明字符串；状态全在 `SessionMemoryStore`（会话数上限 + 空闲 TTL）
+- [ ] P7-3 多轮验收「我在查原神」→「那深渊呢」—— **前置是第二个工具**
+- [x] P7-4 部分：`smoke-memory.ps1` 的 D 条 12 轮通过（20 条停住不涨）；30 轮的 token 曲线仍没跑
+- [x] P7-5 观察过一次裁剪 —— 结论比预期狠，见发现 ③
+
+### P7 的四个发现（都是实测，不是推测）
+
+**① 框架缓存的 ChatMemory 永不淘汰，所以状态必须放 store。**
+`ChatMemoryService` 里就是一个裸 `ConcurrentHashMap`；`ChatMemoryProvider` 只在**首次见到 id** 时被调一次，
+返回的实例被框架永久持有。状态一旦放进 provider 的局部变量或 ChatMemory 实例，淘汰就无从谈起。
+所以淘汰是**两层**：store 管消息正文（占内存的大头，有界），`ChatMemoryAccess#evictChatMemory`
+管框架那层壳（每个一次性请求会留一个几百字节的死条目）。
+
+**② `ChatMemoryAccess` 必须由接口 `extends`，不能强转。**
+`DefaultAiServices` 建代理时接口数组只有 `{aiServiceClass}` 一个元素，所以 `(ChatMemoryAccess) assistant`
+运行时就是 `ClassCastException`；源码里 `method.getDeclaringClass() == ChatMemoryAccess.class` 那条分支，
+只有你的接口继承了它才走得到。**这条是"看起来该能强转"的典型陷阱，实测 200 就是证据。**
+
+**③ 裁剪是按「条」不是按「轮」，会切断一问答。**
+21 条裁到 20 条时只淘汰 1 条，恰好是窗口里第一条 `USER`，而它对应的 `AI(tool_calls) + TOOL + AI` 全留着。
+于是模型看到的第一条是"没被问过就决定去签到"。
+**它不报错**——只有孤儿 `ToolExecutionResultMessage` 会被 provider 拒绝，孤儿 `AiMessage` 合法。
+要修得自己写 turn-aware 的淘汰（或接受它），**先记账不做**。
+
+**④ 记忆降低重复调用，但不消除。**
+同会话连问 5 轮「今天签到了吗」：第 2、4、5 轮吃记忆不调工具，**第 3 轮又调了一次**
+（原话"这次我确实又查了一遍"）。所以 `scripts/smoke-memory.ps1` 的 A 条判定（第二问不调工具）
+**有抖动**：MISS 一次不等于记忆坏了，必须配合 B 条（无会话时必调）一起看才分得清。
+
+### 已验证的证据（2026-11-13）
+
+| 场景 | 结果 |
+|---|---|
+| 同会话两问 | 第 1 问 `tools=checkinToday()`；第 2 问 `tools=` 空，`messages` 5 → 7 |
+| 窗口顶到上限 | 连问 5 轮后 `messages=20` 停住；`SYSTEM` 常驻第 1 条，占掉一个名额 |
+| 孤儿 tool 结果 | 无。淘汰 `AI(tool_calls)` 时框架连带淘汰后继 `TOOL`——**这段不用自己写**，写测试证明就行 |
+| 观测端点 | `GET /api/memory/{id}` 能看到窗口原文；`expired` 区分"看得见"与"下一轮收不到" |
+| 单测 | `SessionMemoryStoreTest` 11 条 + `MemoryPropertiesTest` 3 条；`[MEMORY]` 的淘汰/超时两行日志终于跑到 |
+| **`smoke-memory.ps1`（2026-11-16 实跑）** | **4/4**：A 同会话第二问 0 次工具调用 / B 无会话必调 / C 跨会话必调 / D 12 轮后仍 20 条 |
+| 裁剪痕迹（同日复现） | D 的窗口头部是一条 `AI(工具调用)`，它对应的 `USER` 已被淘汰——发现 ③ 的现场复现了一次 |
 
 **常见坑**
 
 - memory 在内存里，重启就丢——先接受，别急着上 Redis
-- 窗口太大 = 每次都烧钱；太小 = 模型失忆
+- 窗口太大 = 每次都烧钱；太小 = 模型失忆。20 条约等于 4~5 轮带工具的对话（一次工具调用占 3~4 条）
+- 会话 id 是**适配器**产出的，Agent 不解析也不信任。将来 onebot 接入时 id 会含 QQ 号，所以日志一律走 `mask()`
+- **不传会话 id ≠ "给个 default 会话"**：后者会让所有匿名调用串进同一个对话，也会让冒烟用例互相污染
+- 模型调用抛异常时，本轮用户消息已经在 memory 里（框架在发请求前就 add 了），
+  下一轮会看见一句"没被回答过的提问"。要做干净得回滚最后一条，暂未做
+- 调试接口故意不做过期判断（看一眼就删会变成自毁按钮），所以"看得见 7 条"和"下一轮收到 0 条"
+  可以同时为真——这正是 `expired` 字段存在的理由
+- **空闲 TTL 必须远大于单轮耗时（含工具往返）。** 实测把 TTL 调到 1s：一轮之内就"过期"，
+  store 被反复清空重写；带工具那轮更糟——轮内留下了孤零零一条 `TOOL_EXECUTION_RESULT`，
+  下一轮必然被 provider 拒绝。默认 2h 不是随便定的，`hoyo.memory.idle-ttl` 调小要按分钟起步
 
 ---
 
@@ -455,10 +514,27 @@ P6-3 的真实角色输出保留为历史证据；「自然语言 → 真实数�
 - [ ] P9-9 stoken 失效时主动提示重新扫码（`/api/auth/refresh` 失败 → 通知）
   —— 现在失败会亮灯（`/api/checkin/status` 的 `attention` + `kind=AUTH` 日志），但**不会自动续期**；
   没有通知渠道之前，"提示"就是状态页那行红字
+- [ ] **P9-11 签到凭据（v1 `cookie_token`）失效后怎么续期——机制未验证**（2026-11-16 实测）
+  —— 11-13 同账号还能签（`ALREADY`），11-16 三个角色全 `FAILED / kind=AUTH`，而 `hasStoken=true`、
+  `GET /api/auth/roles` 一切正常。这个组合就是"ltoken 还活着、cookie_token 单独过期"：
+  FufuLauncher `TokenRefreshService.CheckCookieValidAsync` 的注释原话是
+  *"The role binding API validates LToken only. CookieToken can expire independently."*
+  → **AUTH 的根因基本可定为 cookie_token 过期**，不是账号、不是风控。
+  但**"点一次 `/api/auth/refresh` 能不能救回来"没有验证过**：`PassportClient.exchangeV2()`
+  收的是全部 `Set-Cookie`，可能带新的 v1 `cookie_token`（能救），也可能只带 `*_v2`（未必救得了，
+  因为签到时那套 cookie 是我们自己拼的）。注意这条**不能说成"只刷 v2 所以救不了"**——
+  那是看代码猜的，RefreshResult 里只检查 `ltoken_v2` 只是回报信息，不代表 jar 里没有 v1。
+  参照物：FufuLauncher 拿到 v2 后是**删掉** v1 的（`TokenRefreshService.RefreshCookieAsync` 149~153 行），
+  说明它认为 v2 够用；我们不敢删，因为 11-12 实测签到认 v1。
+  **下一步是一次实验，不是写代码**：点刷新 → 再 `POST /api/checkin` → 看 `kind` 是否变
 - [x] ~~P9-10 排查 `character/list` 的 `5003`~~ —— **已关闭**：该接口 11-13 删除；实验确认与请求头无关
   （新账号四种头组合全 `5003`，旧账号同一套头 `retcode=0`）
 
 **验收**：连续 3 天自动签到成功，且 `~/.hoyo/credential.properties` 不用再动。
+
+> **2026-11-16 状态：0/3。** `~/.hoyo/checkin/` 里只有 11-13 一条，14/15/16 都没有——
+> 这三天服务根本没在跑（`@Scheduled` 只在进程活着时触发，见坑 15），**不是签到失败**。
+> 想让它成立：今晚之前先重扫二维码（当前凭据已 `AUTH` 失效），然后让服务一直开着。
 
 **开工命令**：
 
@@ -681,6 +757,18 @@ java -jar target\HoyoAgent-0.0.1-SNAPSHOT.jar "--spring.config.import=optional:f
     并且用"今天有没有 DONE 记录"判断该不该补，否则每次重启都会多签一遍
 16. **失败不重试才看得见失败**：给定时任务加自动重试，会把"连续 3 天成功"验收里的那一天悄悄补上，
     于是你永远不知道它当晚失败过。重试要么不做，要么单独记录"第几次尝试"
+17. **`ChatMemory` 和 `ChatMemoryProvider` 不能共存，且 provider 必须恰好一个**：
+    同时存在启动就炸（`Only one out of [chatMemory, chatMemoryProvider] can be configured`），
+    多个 provider 也炸（`Conflict: multiple beans of type ...`）。`@AiService` 是 **按类型**自动接线的
+18. **`ChatMemoryAccess` 要接口继承，不能强转**：框架代理的接口数组只有你的接口一个元素，
+    `(ChatMemoryAccess) assistant` 运行时必 `ClassCastException`
+19. **`MessageWindowChatMemory` 按条裁、不按轮裁**：会留下"没有提问的回答"。
+    不报错（只有孤儿 TOOL 结果非法），但语义是脏的。要轮级淘汰得自己实现 `ChatMemory`
+20. **"没传会话 id 就给个 default 会话"是把两个 bug 写进一行代码**：匿名请求互相串味，
+    冒烟用例逐条污染。正确做法是一次性 id + 用完 `evictChatMemory`，否则框架那层 map 会留死条目
+21. **空闲 TTL 比单轮耗时还短，等于一轮之内反复失忆**：TTL=1s 时 `getMessages` 在轮内就返回空，
+    窗口被清空重写；带工具的轮次还会在轮内留下孤儿 `TOOL_EXECUTION_RESULT`，下一轮直接 400。
+    TTL 的单位应该是"轮"而不是"秒"
 
 **维护记录**
 
@@ -733,3 +821,24 @@ java -jar target\HoyoAgent-0.0.1-SNAPSHOT.jar "--spring.config.import=optional:f
   `[CHECKIN] 今天已签过（…），跳过 STARTUP`（没有发请求）；把 `hoyo.hosts.takumi` 指到不可达端口复现失败
   → `ERROR [CHECKIN][ALERT] STARTUP 签到FAILED：读取绑定角色失败：米游社请求失败（kind=UNKNOWN）`，
   `GET /api/checkin/status` 的 `needsAttention=true`、`attention` 给出人话原因。调试页截图核对过。
+- 2026-11-13 P7 会话层（`465bbe4`）：新增 `agent/memory/{MemoryProperties,SessionMemoryStore,MemoryConfig}`
+  —— `ChatMemoryProvider` 按 `@MemoryId` 给每条会话一个 `MessageWindowChatMemory`（窗口 20），
+  状态统一放 `SessionMemoryStore`（会话数上限 200 + 空闲 TTL 2h + 两层淘汰）；
+  `MihoyoAssistant` 改为 `extends ChatMemoryAccess`（不强转，见坑 18），`chat(@MemoryId, @UserMessage)`；
+  `/agent` 加 `X-Session-Id` 头，缺省走一次性会话并 `evictChatMemory`；新增 `GET/DELETE /api/memory/{sessionId}`
+  （窗口原文 + `expired`）；调试页 sessionId 存 localStorage + 「新会话」按钮；
+  `scripts/smoke-agent.ps1` 改为每条用例独立会话，新增 `scripts/smoke-memory.ps1`（差分验收，未跑）。
+  配置项 `hoyo.memory.{max-messages,max-sessions,idle-ttl}` 进 `application.yml` 与 `.env.example`。
+  验证：单测 14 条全绿（`SessionMemoryStoreTest` 11、`MemoryPropertiesTest` 3，`[MEMORY]` 淘汰/超时日志首次跑到）；
+  真机两问（第 2 问不调工具）、连顶 5 轮到 20 条停住、无孤儿 tool 结果。
+  同日补充：`SessionView` 增加 `expired`（由 `SessionMemoryStore#expired()` 提供，**只看不 `touch()`**，
+  否则打开调试页就等于给会话续命）。实测 TTL=10s：一轮后 `expired=false`，空闲 11s 后 `expired=true`
+  且 3 条内容仍在；另用 TTL=1s 复现了坑 21（轮内过期把窗口切碎）。
+- 2026-11-16 `smoke-memory.ps1` 首次实跑：**4/4**（A 同会话第二问 0 次工具调用 / B 无会话必调 /
+  C 跨会话必调 / D 12 轮后仍 20 条）。D 的窗口头部是一条 `AI(工具调用)` 而其 `USER` 已淘汰，
+  发现 ③ 当场复现。顺带跑出一个真问题：**签到三个角色全 `kind=AUTH`**（11-13 同账号还是 `ALREADY`），
+  组合特征（ltoken 正常 + 签到失败）指向 cookie_token 单独过期 → 记成 P9-11，
+  但**续期能不能靠点一次刷新解决，尚未验证**（本轮的"只刷 v2、救不了"是看代码猜的，已撤回）。
+  另核 `~/.hoyo/checkin/` 只有 11-13 一条，P9 的"连续 3 天"实际 **0/3**（14~16 服务未运行，非失败）。
+  遗留：裁剪按条不按轮（发现 ③）；30 轮未跑；模型调用失败时本轮用户消息留在记忆里
+  （`smoke-memory.ps1` 已于 11-16 补跑，见下条）。

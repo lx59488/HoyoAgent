@@ -81,6 +81,23 @@ public class SessionMemoryStore implements ChatMemoryStore {
         return slot == null ? List.of() : slot.snapshot();
     }
 
+    /**
+     * 会话是否已空闲超时。
+     *
+     * <p>存在的意义只有一个：{@link #snapshot} 故意不做过期判断，于是"调试页看得见 7 条消息"
+     * 和"模型下一轮收到 0 条"会同时为真。把这件事显式说出来，比让人对着调试页猜失忆强。
+     *
+     * <p>两条约定：
+     * <ul>
+     *   <li>只看不碰——这里不调 {@code touch()}，否则打开调试页就等于给会话续命，TTL 永远不生效；</li>
+     *   <li>不存在返回 false——"没有会话"是首次访问，不是过期。</li>
+     * </ul>
+     */
+    public boolean expired(Object memoryId) {
+        Slot slot = slots.get(memoryId);
+        return slot != null && System.nanoTime() - slot.lastAccessNanos() > idleTtl.toNanos();
+    }
+
     public Collection<Object> sessionIds() {
         return List.copyOf(slots.keySet());
     }
