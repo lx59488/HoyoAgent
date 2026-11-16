@@ -1,6 +1,7 @@
 # 新工具建议（对标 FufuLauncher）
 
-> 状态：**建议稿，未落地**。本文不动 `ROADMAP.md` 的进度口径，只回答一个问题：
+> 状态：**建议稿；`getCheckinOverview` 已于 2026-11-16 按 §3.1 落地**（代码 + 单测 5 条通过；
+> 真机验收要等 P9-11 的 `cookie_token` 恢复后再补）。本文不动 `ROADMAP.md` 的进度口径，只回答一个问题：
 > 「除了签到，还该给 Agent 加什么工具？」
 > 参考对象：[FufuLauncher](https://github.com/FufuLauncher/FufuLauncher)（MIT，C#，桌面启动器）。
 > 事实核对基准：`master@bdfddaeb`（2026-11-16）。文中接口/头部/版本号均来自其源码，不是猜的。
