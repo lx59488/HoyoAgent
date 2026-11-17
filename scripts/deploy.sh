@@ -8,12 +8,9 @@
 #
 set -Eeuo pipefail
 
-# 脚本自己也会被 git 更新：先拷一份到 /tmp 再执行，避免 bash 边读边改
-if [ "${DEPLOY_REEXEC:-0}" != "1" ]; then
-  cp "$0" /tmp/hoyo-deploy.sh
-  DEPLOY_REEXEC=1 exec bash /tmp/hoyo-deploy.sh "$@"
-fi
 
+# 注意：git reset/checkout 是“写临时文件再 rename”，运行中的 bash 拿着旧 inode，
+# 不会被截断，所以这里不需要自拷贝
 APP_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$APP_DIR"
 
