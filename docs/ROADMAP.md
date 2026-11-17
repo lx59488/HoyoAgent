@@ -6,7 +6,8 @@
 
 **最后更新：2026-11-16**（P7 会话层已落地，`smoke-memory.ps1` 4/4 通过；P7-3 仍卡在缺第二个工具；
 P9 的 3 天观察是 **0/3**——14~16 服务没在跑，且 11-16 签到凭据 `AUTH` 失效（疑为 cookie_token 单独过期，
-续期机制待验）；P3 的 10 条用例表已作废）
+续期机制待验）；P3 的 10 条用例表已作废；P10 QQ 入口开工——Step 0 桥接脚本已写，**未接真实协议端**
+（NapCat 已于 11-12 停止，改选 LLBot））
 
 ---
 
@@ -24,6 +25,7 @@ P9 的 3 天观察是 **0/3**——14~16 服务没在跑，且 11-16 签到凭�
 | P7 | 记忆与多轮 | 多轮对话不丢上下文 | 1 天 | 🚧 会话层已落地（P7-1 / P7-2）；P7-3 卡在缺第二个工具 |
 | P8 | 工程化扩展（选做） | 多账号 / 可观测 / MCP | 长期 | 未开始 |
 | P9 | 登录与签到 | 扫码拿 stoken，能签当天 | 2~3 天 | 🚧 3 天观察 **0/3**（14~16 服务未运行）；11-16 签到 `AUTH` 失效，续期机制待验（P9-11） |
+| P10 | QQ 入站（OneBot v11） | 在 QQ 私聊里对话 | 1~2 天 | 🚧 Step 0 桥接脚本 + 自检 24 项 + 假服务端 E2E 通过；**未接真实协议端实跑**（NapCat 11-12 已停止，改选 LLBot） |
 
 > **状态校准自 2026-11-07 的代码核对**：P4-5（DeviceIdProvider）、P4-12（关日志）、
 > P6 纵向切片其实都已完成，只是清单没跟上。**这份清单就是项目的单一事实来源，
@@ -99,11 +101,13 @@ src/main/resources/static/               ← 调试页（零构建、无 CDN）
 scripts/smoke-agent.ps1                ← 冒烟脚本（8 条用例，2026-11-07 重写；每条用例一个独立会话）
 scripts/smoke-memory.ps1               ← P7：记忆差分验收（同会话不重复调 / 无会话必调 / 跨会话隔离 / 窗口不涨）
 scripts/login-qr.ps1                   ← P9：建码 → 存 PNG → 轮询到 BOUND
+scripts/qq-bridge/QQBridge.java        ← P10 Step 0：OneBot → /agent 的一次性桥（单文件零依赖，--selftest 可离线自检）
 scripts/round1.md / round2.md          ← P3 两轮原始输出（历史证据，只读）
 scripts/round3.md / round3-decoy.md    ← 新契约下两种 profile 的实测结果（均 8/8）
 .env.example                           ← 配置模板；真实值只写 .env（已 gitignore）
 docs/ROADMAP.md                        ← 本文件
 docs/mihoyo-auth.md                    ← 登录/多用户设计稿；A/B 已落地（P9）
+docs/qq-inbound.md                     ← P10：QQ 入站设计（路线选择 / 边界 / 白名单 / Step 1 计划）
 ```
 
 接口：`GET /`（调试页：扫码绑定 + 会话对话）、`GET /chat?q=`（纯问答，对照组：无工具、无记忆）、
@@ -579,6 +583,41 @@ Invoke-RestMethod "http://localhost:8080/api/checkin/run?force=true" -Method Pos
 
 **已知边界**：单用户——文件名只有日期，`userId` 写在文件里，换账号时会覆盖上一个人的记录；
 多用户时按 `userId` 分目录或直接上库，`CheckinScheduler` 不用改。
+
+---
+
+## P10 · QQ 入站（2026-11-16 起）
+
+> 目标：入口从「浏览器 / curl」变成「QQ 里直接聊」。
+> 设计细节全部在 [`qq-inbound.md`](qq-inbound.md)，这里只放进度与两条硬规则。
+
+**可行性结论**：可行。卡点不是 QQ 协议，是「进程级单凭据」——所以第一版只能**自用私聊**。
+
+**路线**：官方机器人对个人主体只开放 QQ 频道（群聊仅企业主体、单聊要定向邀请），
+所以走 **LLBot + OneBot v11**。代价是违反腾讯用户协议、可能风控/封号，**必须用小号**。
+
+> **2026-11-16 补：NapCat 已停止。** 当天核实：仓库 2026-11-12 03:26 自清空（45 分支→1、
+> 761 tag 与全部 release 删除），最后版本 v4.18.42（2026-10-30）。
+> 首选协议端改为 **LLBot**，Lagrange 已放弃 OneBot 11。**代码不用改**——桥只依赖 OneBot 11 协议。
+> 细节见 [`qq-inbound.md`](qq-inbound.md) §2.1。
+
+- [x] P10-1 路线调研：查实官方场景限制（个人主体：频道 ✅ / 群 ❌ / 单聊 ❌）
+- [x] P10-2 边界确认：OneBot 属于 `adapter`（入站），Agent 层零改动；会话 id `qq:c2c:{id}` / `qq:group:{gid}:{uid}`
+- [x] P10-3 Step 0 桥：`scripts/qq-bridge/QQBridge.java`（WS + 最小 JSON + 虚拟线程，单文件零依赖）
+- [x] P10-4 离线自检：`--selftest` **24 项通过**（JSON 解析 / CQ 码剥离 / 切片不丢字 / 白名单矩阵 / 序列化往返 / 异常兜底文案）
+- [x] P10-4b 假服务端 E2E（脚手架未提交）：握手 → 陌生人被拦（0 帧）→ 白名单消息带 `qq:c2c:10001` 打到 `/agent`
+      → 2000 字切 3 条（800/800/400）；agent 挂掉时回「【连不上 Agent】…」而不是 `null`；断线退避 3s→6s
+- [ ] P10-5 **实跑**：装 LLBot → 小号扫码 → 开 3001 → 私聊发「签到了吗」收到回复
+- [ ] P10-6 Step 1：抽 `AgentChatService`，落 `adapter/onebot`（同会话串行 + `qq.enabled=false` 默认关）
+- [ ] P10-7 进群的前置：P8 的 `@ToolMemoryId → userId → 凭据`；在此之前 `QQ_GROUP_MODE` 保持 `off`
+
+**两条硬规则（写在这里，免得将来手滑）**
+
+1. `QQ_ALLOWLIST` 为空 = 谁都不回。**默认必须是拒绝**，不是「谁都能用」。
+2. 群聊打开后仍只回白名单，但**回复是发在群里的**——白名单挡的是「谁能触发」，挡不住「谁能看见」。
+
+**验收**：QQ 私聊里问「今天签到了吗」，回复与 `GET /api/checkin/status` 一致；
+再用一个**不在白名单**的号发同一句，必须没有任何回复（fail closed 的证据，不是"大概没收到"）。
 
 ---
 
