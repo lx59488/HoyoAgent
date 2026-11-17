@@ -1,0 +1,98 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: hoyoagent
+  namespace: hoyoagent
+  labels:
+    app.kubernetes.io/name: hoyoagent
+spec:
+  # 必须保持 1。三个原因都是「进程内状态」：
+  #   1. 签到定时任务每个进程都会在 00:10 跑一遍，锁是进程内 ReentrantLock，挡不住第二个 Pod
+  #   2. 会话记忆（SessionMemoryStore）是进程内 Map，多副本要 sticky session 才不串味
+  #   3. 数据卷是 ReadWriteOnce，同一时刻只能挂到一个节点
+  replicas: 1
+  # Recreate 而不是 RollingUpdate：RWO 卷不能同时挂两个 Pod
+  strategy:
+    type: Recreate
+  minReadySeconds: 10
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: hoyoagent
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: hoyoagent
+    spec:
+      terminationGracePeriodSeconds: 40
+      automountServiceAccountToken: false
+      securityContext:
+        runAsUser: 10001
+        runAsGroup: 10001
+        # fsGroup 让挂上来的 PVC 对 10001 可写
+        fsGroup: 10001
+        fsGroupChangePolicy: OnRootMismatch
+      containers:
+        - name: app
+          image: hoyoagent:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+          envFrom:
+            - configMapRef:
+                name: hoyoagent-config
+            - secretRef:
+                name: hoyoagent-secret
+          env:
+            # -Duser.home=/data：账号、签到记录、device-id 都写在 $HOME/.hoyo，
+            # 换掉这个值等于换一份数据
+            - name: JAVA_OPTS
+              value: >-
+                -XX:MaxRAMPercentage=70
+                -XX:+ExitOnOutOfMemoryError
+                -Duser.home=/data
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              # 堆按 70% 算（约 700Mi），其余留给元空间和线程栈；再小容易 OOMKilled
+              memory: 1Gi
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: data
+              mountPath: /data
+          # 冷启动最多 60s，期间 liveness 不介入
+          startupProbe:
+            tcpSocket:
+              port: http
+            periodSeconds: 2
+            failureThreshold: 30
+          # 只读文件不联网，最便宜的「应用层」探针
+          readinessProbe:
+            httpGet:
+              path: /api/checkin/status
+              port: http
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+          # 活着就行，别因为米游社超时把 Pod 重启掉
+          livenessProbe:
+            tcpSocket:
+              port: http
+            periodSeconds: 20
+            timeoutSeconds: 3
+            failureThreshold: 3
+          lifecycle:
+            preStop:
+              exec:
+                # 给 Service 摘流量的时间，否则滚更会丢几个请求
+                command: ["sh", "-c", "sleep 5"]
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: hoyoagent-data

@@ -1,0 +1,33 @@
+# 可选文件：默认不进 kustomization，需要对外暴露时再单独 apply。
+#
+#   kubectl apply -f deploy/k8s/ingress.example.yaml
+#
+# ⚠️ 这个服务没有任何鉴权：/chat、/agent、/api/checkin/run 谁调都行。
+# 挂到公网 = 别人白用你的 DeepSeek 额度、能触发你的签到、能读到 /api/auth/status。
+# 真要用，至少加 Basic Auth（nginx.ingress.kubernetes.io/auth-* 注解），
+# 或者只放内网 / 走 VPN。
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: hoyoagent
+  namespace: hoyoagent
+  annotations:
+    # 一轮对话可能跑到 60s（langchain4j timeout=PT60S），别让网关先掐断
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "120"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "120"
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: hoyoagent.example.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: hoyoagent
+                port:
+                  name: http
+  # tls:
+  #   - hosts: [hoyoagent.example.com]
+  #     secretName: hoyoagent-tls

@@ -1,0 +1,33 @@
+# 非敏感配置。改完要 kubectl apply -k deploy/k8s 或 rollout restart 才生效。
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: hoyoagent-config
+  namespace: hoyoagent
+data:
+  # 日志时间、cron 的「今天」都按这个时区算
+  TZ: Asia/Shanghai
+  HOME: /data
+
+  # DeepSeek（API key 在 Secret 里）
+  DS_BASE_URL: https://api.deepseek.com/v1
+  DS_MODEL_NAME: deepseek-flash
+
+  # 单用户阶段固定 local
+  HOYO_USER_ID: local
+
+  # 每日签到：00:10 跑，失败不重试，看日志和 /api/checkin/status
+  HOYO_CHECKIN_ENABLED: "true"
+  HOYO_CHECKIN_CRON: "0 10 0 * * *"
+  HOYO_CHECKIN_ZONE: Asia/Shanghai
+  # 错过 00:10（Pod 当时不在）时，启动后多久补签
+  HOYO_CHECKIN_STARTUP_DELAY: 60s
+
+  # 会话记忆是进程内的，多副本不共享
+  HOYO_MEMORY_MAX_MESSAGES: "20"
+  HOYO_MEMORY_MAX_SESSIONS: "200"
+  HOYO_MEMORY_IDLE_TTL: 2h
+
+  # 优雅停机：滚更时先停止接新请求，再等手上请求跑完
+  SERVER_SHUTDOWN: graceful
+  SPRING_LIFECYCLE_TIMEOUT_PER_SHUTDOWN_PHASE: 20s

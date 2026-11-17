@@ -31,4 +31,12 @@ build/
 
 ### VS Code ###
 .vscode/
-/.env
+
+### 本地配置：真实值只写 .env，任何目录下都不进版本库
+### 只写 /.env 会漏掉 config/.env —— 附录 B 的部署命令正好用那个路径，等于把 cookie 提交上去
+.env
+
+# 部署：本地数据卷、k8s 真实 Secret（用 kubectl 创建，不进仓库）
+data/
+deploy/k8s/secret.yaml
+backups/

@@ -1,0 +1,58 @@
+# HoyoAgent 单机部署：docker compose up -d --build
+#
+#   cp .env.example .env      # 首次：填 DS_API_KEY 和 HOYO_COOKIE（或之后扫码）
+#   docker compose up -d --build
+#   docker compose logs -f
+#
+# 升级：docker compose up -d --build      （卷里的账号凭据不会动）
+# 卸载：docker compose down               （加 -v 才会连卷一起删，等于解绑账号）
+
+name: hoyoagent
+
+services:
+  app:
+    build:
+      context: .
+      args:
+        # 拉不动 docker.io 时换成自己的镜像源
+        BUILD_IMAGE: ${BUILD_IMAGE:-docker.io/eclipse-temurin:25-jdk}
+        RUNTIME_IMAGE: ${RUNTIME_IMAGE:-docker.io/eclipse-temurin:25-jre}
+    image: hoyoagent:${TAG:-latest}
+    container_name: hoyoagent
+    restart: unless-stopped
+
+    # .env 里的 DS_* / HOYO_* 原样注入。文件不存在也不报错，
+    # 服务照常起来，只是没绑账号——此时 POST /api/auth/qr 扫码也能绑。
+    # 注意：required: false 需要 Compose 2.24+，老版本改成 - .env
+    env_file:
+      - path: .env
+        required: false
+
+    environment:
+      TZ: Asia/Shanghai
+      HOME: /data
+
+    ports:
+      # 只绑本机：这个服务没有任何鉴权，别默认暴露到局域网
+      - "127.0.0.1:${HOST_PORT:-8080}:8080"
+
+    volumes:
+      # 唯一需要持久化的目录：$HOME/.hoyo 下是账号凭据、签到记录、device-id
+      - hoyo-data:/data
+
+    # 运行镜像里没有 curl，用 bash 的 /dev/tcp 探端口
+    healthcheck:
+      test: ["CMD-SHELL", "timeout 3 bash -c '</dev/tcp/127.0.0.1/8080' || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 60s
+
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  hoyo-data:

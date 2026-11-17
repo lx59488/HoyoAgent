@@ -1,0 +1,14 @@
+# 账号凭据（含 stoken）就在这个卷里：删 PVC = 解绑米游社账号，要重扫才能恢复。
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: hoyoagent-data
+  namespace: hoyoagent
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 1Gi
+  # 集群有多个 StorageClass 时指定一个；留空走默认
+  # storageClassName: standard

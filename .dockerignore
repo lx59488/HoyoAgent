@@ -1,0 +1,20 @@
+.git
+.gitignore
+.gitattributes
+.idea
+.vscode
+
+# 真实凭据：绝对不能进构建上下文
+.env
+.env.*
+
+# 本地产物与挂载数据
+target
+data
+logs
+
+docs
+scripts
+*.md
+compose.yaml
+deploy

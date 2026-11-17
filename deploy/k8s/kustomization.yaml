@@ -1,0 +1,21 @@
+# 一次性装好：kubectl apply -k deploy/k8s
+#
+# 前置：先建 Secret（见 secret.example.yaml 顶部的命令），
+# 否则 Pod 会卡在 CreateContainerConfigError。
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: hoyoagent
+
+resources:
+  - namespace.yaml
+  - configmap.yaml
+  - pvc.yaml
+  - deployment.yaml
+  - service.yaml
+
+images:
+  # 推到自己的仓库后改这两行，deployment.yaml 不用动
+  - name: hoyoagent
+    newName: hoyoagent
+    newTag: latest
