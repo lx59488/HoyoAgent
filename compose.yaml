@@ -33,8 +33,8 @@ services:
       HOME: /data
 
     ports:
-      # 只绑本机：这个服务没有任何鉴权，别默认暴露到局域网
-      - "127.0.0.1:${HOST_PORT:-8080}:8080"
+      # 默认只绑本机；服务器上在 .env 里设 BIND_ADDR=0.0.0.0 才对局域网开放
+      - "${BIND_ADDR:-127.0.0.1}:${HOST_PORT:-8080}:8080"
 
     volumes:
       # 唯一需要持久化的目录：$HOME/.hoyo 下是账号凭据、签到记录、device-id
