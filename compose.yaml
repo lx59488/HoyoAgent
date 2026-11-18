@@ -49,10 +49,8 @@ services:
       start_period: 60s
 
     logging:
-      driver: json-file
+      driver: journald
       options:
-        max-size: "10m"
-        max-file: "3"
-
+        tag: hoyoagent
 volumes:
   hoyo-data:
