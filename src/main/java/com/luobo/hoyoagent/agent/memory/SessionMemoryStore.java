@@ -4,13 +4,12 @@ import dev.langchain4j.data.message.ChatMessage;
 import dev.langchain4j.store.memory.chat.ChatMemoryStore;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 import java.time.Duration;
-import java.util.Collection;
-import java.util.Comparator;
-import java.util.List;
-import java.util.Map;
+import java.time.Instant;
+import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
@@ -35,11 +34,20 @@ public class SessionMemoryStore implements ChatMemoryStore {
 
     private final Duration idleTtl;
 
+    private final MemoryPersistence persistence;
+
     private final Map<Object, Slot> slots = new ConcurrentHashMap<>();
 
+    /** 单测用：只有内存，不落盘。 */
     public SessionMemoryStore(MemoryProperties properties) {
+        this(properties, null);
+    }
+
+    @Autowired
+    public SessionMemoryStore(MemoryProperties properties, MemoryPersistence persistence) {
         this.maxSessions = properties.maxSessions();
         this.idleTtl = properties.idleTtl();
+        this.persistence = persistence;
     }
 
 
@@ -47,9 +55,12 @@ public class SessionMemoryStore implements ChatMemoryStore {
     public List<ChatMessage> getMessages(Object memoryId) {
         Slot slot = slots.get(memoryId);
         if (slot == null) {
-            return List.of();
+            slot = restore(memoryId);
+            if (slot == null) {
+                return List.of();
+            }
         }
-        if (System.nanoTime() - slot.lastAccessNanos() > idleTtl.toNanos()) {
+        if (idleSince(slot.lastAccess())) {
             if (slots.remove(memoryId, slot)) {
                 log.info("[MEMORY] 会话空闲超时，丢弃 session={} messages={}",
                         mask(memoryId), slot.size());
@@ -63,16 +74,46 @@ public class SessionMemoryStore implements ChatMemoryStore {
     @Override
     public void updateMessages(Object memoryId, List<ChatMessage> messages) {
         if (messages == null || messages.isEmpty()) {
-            slots.remove(memoryId);
+            slots.remove(memoryId);                 // 和 deleteMessages 保持一致
+            if (persistence != null) {
+                persistence.delete(String.valueOf(memoryId));
+            }
             return;
         }
-        slots.computeIfAbsent(memoryId, key -> new Slot()).replace(messages);
+        Slot slot = slots.computeIfAbsent(memoryId, key -> new Slot());
+        slot.replace(messages);
+        if (persistence != null) {
+            persistence.save(String.valueOf(memoryId), messages, slot.lastAccess());
+        }
         evictOverflow();
     }
 
     @Override
     public void deleteMessages(Object memoryId) {
         slots.remove(memoryId);
+        if (persistence != null) {
+            persistence.delete(String.valueOf(memoryId));
+        }
+    }
+
+    /** 新进程第一次见到这个会话：内存 miss 才读盘。 */
+    private Slot restore(Object memoryId) {
+        if (persistence == null) {
+            return null;
+        }
+        Optional<MemoryPersistence.Stored> stored = persistence.load(String.valueOf(memoryId));
+        if (stored.isEmpty() || stored.get().messages().isEmpty()) {
+            return null;
+        }
+        Slot slot = new Slot();
+        slot.replaceAt(stored.get().messages(), stored.get().updatedAt());
+        if (idleSince(slot.lastAccess())) {
+            log.info("[MEMORY] 磁盘上的会话已空闲超时，当作新会话 session={}", mask(memoryId));
+            return null;
+        }
+        slots.put(memoryId, slot);
+        log.info("[MEMORY] 从磁盘恢复会话 session={} messages={}", mask(memoryId), slot.size());
+        return slot;
     }
 
     /** 只读快照，给调试接口和 Controller 用；不做 TTL 判断，免得"看一眼"把会话踩死。 */
@@ -95,17 +136,21 @@ public class SessionMemoryStore implements ChatMemoryStore {
      */
     public boolean expired(Object memoryId) {
         Slot slot = slots.get(memoryId);
-        return slot != null && System.nanoTime() - slot.lastAccessNanos() > idleTtl.toNanos();
+        return slot != null && idleSince(slot.lastAccess());
     }
 
     public Collection<Object> sessionIds() {
         return List.copyOf(slots.keySet());
     }
 
+    private boolean idleSince(Instant at) {
+        return Duration.between(at, Instant.now()).compareTo(idleTtl) > 0;
+    }
+
     private void evictOverflow() {
         while (slots.size() > maxSessions) {
             Map.Entry<Object, Slot> oldest = slots.entrySet().stream()
-                    .min(Comparator.comparingLong(entry -> entry.getValue().lastAccessNanos()))
+                    .min(Comparator.comparing(entry -> entry.getValue().lastAccess()))
                     .orElse(null);
             if (oldest == null) {
                 return;
@@ -124,12 +169,12 @@ public class SessionMemoryStore implements ChatMemoryStore {
 
 
 
-    /** 一条会话：消息不可变、替换而非追加修改；最后访问时间用单调时钟。 */
+    /** 一条会话：消息不可变、替换而非追加修改。 */
     private static final class Slot {
 
         private volatile List<ChatMessage> messages = List.of();
 
-        private volatile long lastAccessNanos = System.nanoTime();
+        private volatile Instant lastAccess = Instant.now();
 
         List<ChatMessage> snapshot() {
             return messages;
@@ -139,17 +184,22 @@ public class SessionMemoryStore implements ChatMemoryStore {
             return messages.size();
         }
 
-        long lastAccessNanos() {
-            return lastAccessNanos;
+        Instant lastAccess() {
+            return lastAccess;
         }
 
         void touch() {
-            lastAccessNanos = System.nanoTime();
+            lastAccess = Instant.now();
         }
 
         void replace(List<ChatMessage> newMessages) {
             messages = List.copyOf(newMessages);
-            lastAccessNanos = System.nanoTime();
+            lastAccess = Instant.now();
+        }
+
+        void replaceAt(List<ChatMessage> newMessages, Instant at) {
+            messages = List.copyOf(newMessages);
+            lastAccess = at;
         }
     }
 }

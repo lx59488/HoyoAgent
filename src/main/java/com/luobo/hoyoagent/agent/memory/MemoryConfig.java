@@ -21,10 +21,6 @@ public class MemoryConfig {
 
     @Bean
     public ChatMemoryProvider chatMemoryProvider(SessionMemoryStore store, MemoryProperties properties) {
-        return memoryId -> MessageWindowChatMemory.builder()
-                .id(memoryId)
-                .maxMessages(properties.maxMessages())
-                .chatMemoryStore(store)
-                .build();
+        return memoryId -> new TurnWindowChatMemory(memoryId, store, properties.maxMessages());
     }
 }
