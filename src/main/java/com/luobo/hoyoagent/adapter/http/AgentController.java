@@ -1,5 +1,6 @@
 package com.luobo.hoyoagent.adapter.http;
 
+import com.luobo.hoyoagent.agent.AgentChatService;
 import com.luobo.hoyoagent.agent.MihoyoAssistant;
 import com.luobo.hoyoagent.agent.memory.SessionMemoryStore;
 import com.luobo.hoyoagent.agent.observability.ToolCallRecorder;
@@ -19,19 +20,11 @@ public class AgentController {
     /** 不带 X-Session-Id 时用的一次性会话前缀：请求结束即销毁，行为和加记忆之前完全一致。 */
     private static final String ONE_SHOT_PREFIX = "one-shot:";
 
-    private final MihoyoAssistant assistant;
+    private final AgentChatService chat;
 
-    private final ToolCallRecorder recorder;
-
-    private final SessionMemoryStore memoryStore;
-
-
-    public AgentController(MihoyoAssistant assistant, ToolCallRecorder recorder, SessionMemoryStore memoryStore) {
-        this.assistant = assistant;
-        this.recorder = recorder;
-        this.memoryStore = memoryStore;
+    public AgentController(AgentChatService chat) {
+        this.chat = chat;
     }
-
 
     /**
      * 会话身份由调用方（适配器）给，Agent 只当不透明字符串用：
@@ -50,20 +43,15 @@ public class AgentController {
 
         boolean oneShot = sessionId == null || sessionId.isBlank();
         String id = oneShot ? ONE_SHOT_PREFIX + UUID.randomUUID() : sessionId.trim();
-
         try {
-            String reply = assistant.chat(id, q);
-            // 唯一出口：drain 只在这里调一次 —— 一定被取走，也一定被清空
-            return Result.success(new AgentAnswer(
-                    reply, recorder.drain(), id, memoryStore.snapshot(id).size()));
+            AgentChatService.Answer answer = chat.ask(id, q);
+            return Result.success(new AgentAnswer(answer.reply(), answer.toolsCalled(), id, answer.messages()));
         } catch (Exception e) {
-            recorder.drain();
             return Result.error(ErrorCode.INTERNAL_ERROR,
                     e.getClass().getSimpleName() + ": " + e.getMessage());
         } finally {
             if (oneShot) {
-                memoryStore.deleteMessages(id);
-                assistant.evictChatMemory(id);
+                chat.evict(id);
             }
         }
     }

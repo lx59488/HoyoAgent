@@ -11,20 +11,22 @@
 
 可行。真正卡住的不是 QQ 协议，是**当前进程只有一份米游社凭据**——所以第一版只能是「只回自己私聊」的形态。
 
-## 2. 两条路线，个人主体实际上只剩一条
+## 2. 两条路线（官方那条 2026-11-18 复查后**已经走通**）
 
 | | 官方 QQ 机器人（开放平台） | 第三方协议端 + OneBot v11 |
 |---|---|---|
-| 场景 | 个人主体**只能开 QQ 频道**；群聊仅企业主体；单聊要「定向邀请」 | 私聊 / 群聊都能 |
+| 场景 | 个人主体：频道 ✅、群（自己是群主/管理员）✅、**单聊 ✅**（加「开发体验用户」，上限 20 个号）；共同限制是**不能公开使用** | 私聊 / 群聊都能 |
 | 合规 | 合规 | 违反腾讯用户协议，可能风控/封号 |
-| 接入 | AppID/AppSecret + 事件推送，Webhook 要 5 秒内 ack | 装 LLBot，扫码登录，开一个 WS 端口 |
-| 上手 | 要主体认证、审核、发布 | 半小时 |
+| 接入 | AppID/AppSecret + WS 网关（不需要公网）或 Webhook | 装 LLBot，扫码登录，开一个 WS 端口 |
+| 上手 | 自助注册，创建即用 | 要人工申请授权，可能等很久 |
 
-腾讯文档把场景写死了：个人开发者「QQ群：暂不开放，消息列表单聊：暂不开放」，只剩频道
-（[bot-docs](https://github.com/tencent-connect/bot-docs/blob/645787a45937e5d9c4f0f61afefdffde0f38696e/docs/README.md)、[QQ Bot 接入指南](https://bot.qq.com/wiki/)）。
-「在 QQ 里像和一个人聊天」只有第二条路。
+> **2026-11-18 修正**：11-16 这里写的是「个人主体只能开 QQ 频道」，引用的是 2025-04 的文档快照。
+> 现行官方 FAQ 已经放宽（[bot_FAQ](https://bot.q.qq.com/wiki/bot_FAQ/)、[接入指南](https://bot.q.qq.com/wiki/)）：
+> 个人认证可创建 5 个机器人；群聊可加「自己是群主/管理员」的群；
+> **单聊通过「开发设置 → 开发体验用户号码」开放（上限 20 个）**；个人主体只是「暂不支持公开使用」。
+> 对「只和自己聊」这个场景，这条口子是通的——**比等 LLBot 人工审核更靠谱**。
 
-**协议端选 LLBot（LuckyLilliaBot，原 LLOneBot/LLTwoBot）**：基于 NTQQ，Windows 有 Desktop 版，
+**第三方协议端选 LLBot（LuckyLilliaBot，原 LLOneBot/LLTwoBot）**：基于 NTQQ，Windows 有 Desktop 版，
 OneBot 11 支持正向 WS / 反向 WS / HTTP / Webhook —— 正好是桥需要的那一种。
 go-cqhttp 早已停更；Lagrange 的 V2 仓库已 archive，且明确不再支持 OneBot 11（只留 Milky）。
 

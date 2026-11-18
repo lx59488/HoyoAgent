@@ -41,3 +41,13 @@ hoyo:
 logging:
   level:
     dev.langchain4j: WARN
+
+
+qq:
+  enabled: ${QQ_BOT_ENABLED:false}          # 默认关：没凭据也能正常启动
+  app-id: ${QQ_APP_ID:}
+  client-secret: ${QQ_APP_SECRET:}
+  allowlist: ${QQ_ALLOWLIST:}               # openid，逗号分隔
+  api-base: ${QQ_API_BASE:https://api.sgroup.qq.com}   # 沙箱是 https://sandbox.api.sgroup.qq.com
+  max-replies: 4
+  reply-chunk-chars: 600
