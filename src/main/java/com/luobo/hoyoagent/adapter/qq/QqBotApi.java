@@ -2,6 +2,7 @@ package com.luobo.hoyoagent.adapter.qq;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Component;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
@@ -31,7 +32,7 @@ public class QqBotApi {
     private volatile String token;
     private volatile Instant expiresAt = Instant.EPOCH;
 
-    public QqBotApi(QqBotProperties props, HttpClient http, ObjectMapper mapper) {
+    public QqBotApi(QqBotProperties props, @Qualifier("qqHttpClient") HttpClient http, ObjectMapper mapper) {
         this.props = props;
         this.http = http;
         this.mapper = mapper;
@@ -74,8 +75,11 @@ public class QqBotApi {
     /**
      * 被动回复单聊。msgId 来自事件 d.id，5 分钟内有效；同一 msgId 下 msg_seq 必须递增，
      * 否则平台按重复消息丢弃（40054005）。
+     *
+     * @return HTTP 非 200 返回 {@code false}（只记日志）；网络异常仍会抛出，由调用方兜底。
+     *         注意：这里发的是<b>被动回复</b>，不能当主动推送通道用（主动消息另有频控）。
      */
-    public void sendC2c(String openid, String content, String msgId, int seq) {
+    public boolean sendC2c(String openid, String content, String msgId, int seq) {
         Map<String, Object> payload = new LinkedHashMap<>();
         payload.put("content", content);
         payload.put("msg_type", 0);       // 0 = 纯文本
@@ -95,7 +99,9 @@ public class QqBotApi {
         }
         if (resp.statusCode() != 200) {
             log.warn("[QQ] 发送失败 HTTP {}：{}", resp.statusCode(), snippet(resp.body()));
+            return false;
         }
+        return true;
     }
 
     private HttpResponse<String> post(String url, String bearer, String body) {

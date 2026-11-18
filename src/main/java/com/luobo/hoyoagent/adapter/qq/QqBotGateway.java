@@ -2,6 +2,7 @@ package com.luobo.hoyoagent.adapter.qq;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.context.event.EventListener;
 import org.springframework.stereotype.Component;
@@ -43,11 +44,10 @@ public class QqBotGateway {
         return t;
     });
 
-    private volatile Listener current;
     private volatile ScheduledFuture<?> heartbeat;
 
     public QqBotGateway(QqBotProperties props, QqBotApi api, QqBotDispatcher dispatcher,
-                        HttpClient http, ObjectMapper mapper) {
+                        @Qualifier("qqHttpClient") HttpClient http, ObjectMapper mapper) {
         this.props = props;
         this.api = api;
         this.dispatcher = dispatcher;
@@ -89,7 +89,6 @@ public class QqBotGateway {
     private void connectOnce() throws Exception {
         String url = gatewayUrl();
         Listener listener = new Listener();
-        this.current = listener;
         http.newWebSocketBuilder()
                 .connectTimeout(Duration.ofSeconds(10))
                 .buildAsync(URI.create(url), listener)
@@ -162,13 +161,11 @@ public class QqBotGateway {
     }
 
     private final class Listener implements WebSocket.Listener {
-        private volatile WebSocket socket;
         final CountDownLatch closed = new CountDownLatch(1);
         private final StringBuilder buffer = new StringBuilder();
 
         @Override
         public void onOpen(WebSocket socket) {
-            this.socket = socket;
             socket.request(1);
         }
 

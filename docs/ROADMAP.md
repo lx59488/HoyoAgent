@@ -4,10 +4,9 @@
 > 用法：从上往下做，每完成一条把 `[ ]` 改成 `[x]`。每个阶段结束后打一个 git tag（`phase-1`、`phase-2`…）。
 > 设计原则：**先用假数据学 Agent，再接真实 API**。两条线并行、互不阻塞。
 
-**最后更新：2026-11-16**（P7 会话层已落地，`smoke-memory.ps1` 4/4 通过；P7-3 仍卡在缺第二个工具；
-P9 的 3 天观察是 **0/3**——14~16 服务没在跑，且 11-16 签到凭据 `AUTH` 失效（疑为 cookie_token 单独过期，
-续期机制待验）；P3 的 10 条用例表已作废；P10 QQ 入口开工——Step 0 桥接脚本已写，**未接真实协议端**
-（NapCat 已于 11-12 停止，改选 LLBot））
+**最后更新：2026-11-18**（P7 会话层已落地；P9 的 3 天观察仍是 **0/3**，11-16 签到 `AUTH` 失效、
+续期机制待验；QQ 主线从 P10（OneBot）切到 **P11（官方机器人）**：`adapter/qq` 已落地、
+`AgentChatService` 已抽、签到结果接上 `Notifier`、切片抽成 `TextChunker`；**仍未真机实跑**）
 
 ---
 
@@ -25,7 +24,8 @@ P9 的 3 天观察是 **0/3**——14~16 服务没在跑，且 11-16 签到凭�
 | P7 | 记忆与多轮 | 多轮对话不丢上下文 | 1 天 | 🚧 会话层已落地（P7-1 / P7-2）；P7-3 卡在缺第二个工具 |
 | P8 | 工程化扩展（选做） | 多账号 / 可观测 / MCP | 长期 | 未开始 |
 | P9 | 登录与签到 | 扫码拿 stoken，能签当天 | 2~3 天 | 🚧 3 天观察 **0/3**（14~16 服务未运行）；11-16 签到 `AUTH` 失效，续期机制待验（P9-11） |
-| P10 | QQ 入站（OneBot v11） | 在 QQ 私聊里对话 | 1~2 天 | 🚧 Step 0 桥接脚本 + 自检 24 项 + 假服务端 E2E 通过；**未接真实协议端实跑**（NapCat 11-12 已停止，改选 LLBot） |
+| P10 | QQ 入站（OneBot v11） | 在 QQ 私聊里对话 | 1~2 天 | ⏸️ 降级为备选：Step 0 桥已删除（git `3dcd255` 可恢复），协议代码不复用 |
+| P11 | QQ 官方机器人 | 手机 QQ 里直接对话 | 1~2 天 | 🚧 `adapter/qq` + `AgentChatService` + `TextChunker` 已落地；**未真机验收**（P11-5） |
 
 > **状态校准自 2026-11-07 的代码核对**：P4-5（DeviceIdProvider）、P4-12（关日志）、
 > P6 纵向切片其实都已完成，只是清单没跟上。**这份清单就是项目的单一事实来源，
@@ -43,15 +43,25 @@ com.luobo.hoyoagent
 │   ├── exception/{BusinessException, ErrorCode, GlobalExceptionHandler}.java
 │   ├── log/ErrorLogSanitizer.java
 │   └── result/Result.java
-├── adapter/
-│   └── http/
-│       ├── ChatController.java        ← P1：纯模型问答（对照组，不挂工具也不挂记忆）
-│       ├── AgentController.java       ← P2/P7：走 AiService，X-Session-Id 定会话，回传 toolsCalled
-│       ├── AuthController.java        ← P9：扫码登录 + 绑定角色 + v2 刷新
-│       ├── MemoryController.java      ← P7：GET/DELETE /api/memory/{sessionId}（唯一观测口）
-│       └── CheckinController.java     ← P9：POST /api/checkin
+├── adapter/                           ← 只表示「入站」：把外部协议翻译成 AgentChatService 调用
+│   ├── http/
+│   │   ├── ChatController.java        ← P1：纯模型问答（对照组，不挂工具也不挂记忆）
+│   │   ├── AgentController.java       ← P2/P7：走 AiService，X-Session-Id 定会话，回传 toolsCalled
+│   │   ├── AuthController.java        ← P9：扫码登录 + 绑定角色 + v2 刷新
+│   │   ├── MemoryController.java      ← P7：GET/DELETE /api/memory/{sessionId}（唯一观测口）
+│   │   └── CheckinController.java     ← P9：POST /api/checkin
+│   └── qq/                            ← P11：QQ 官方机器人（入站 + 被动回复）
+│       ├── QqBotGateway.java          ← WS 网关：identify / 心跳 / 重连（只管协议）
+│       ├── QqBotDispatcher.java       ← 事件 → 白名单 → 去重 → Agent → 切片 → 回复
+│       ├── QqBotApi.java              ← access_token 刷新 + POST /v2/users/{openid}/messages
+│       ├── QqBotProperties.java       ← qq.*：凭据 / 白名单（openid）/ 切片上限
+│       └── QqBotConfig.java           ← HttpClient（显式命名，避免多平台时按类型注入歧义）
+├── channel/                           ← 平台无关的会话管道（接第二个平台前的落点）
+│   └── TextChunker.java               ← 切片：换行优先 / 超长硬切 / 最多 N 段 / 不劈 emoji
 ├── agent/
+│   ├── AgentChatService.java          ← 入口共用：ask / evict（http 与 qq 同一套）
 │   ├── MihoyoAssistant.java           ← @AiService 接口（无实现，运行时动态代理）；extends ChatMemoryAccess
+│   ├── notify/                        ← 出站通知：Notification / Notifier / WebhookNotifier（签到结果）
 │   ├── memory/                        ← P7：会话记忆（唯一状态在这里）
 │   │   ├── MemoryProperties.java      ← hoyo.memory.*；null / 非法值落默认值
 │   │   ├── SessionMemoryStore.java    ← ChatMemoryStore 实现：会话数上限 + 空闲 TTL + expired()
@@ -83,15 +93,15 @@ com.luobo.hoyoagent
     ├── sign/DsSigner.java             ← DS1 / DS2 公式与 md5（唯一签名入口）
     └── config/HoyoProperties.java     ← @ConfigurationProperties(prefix = "hoyo")
 
-src/test/java/...
-├── agent/memory/SessionMemoryStoreTest.java ← 会话数上限 / 空闲 TTL / 删除 / 过期标记（11 条）
-├── agent/memory/MemoryPropertiesTest.java   ← 配置缺省与非法值兜底（3 条）
-├── mihoyo/record/RecordClientTest.java    ← @Tag("network")，真实打米游社
-├── mihoyo/transport/MihoyoHttpTest.java   ← MockWebServer：retcode/header/POST 语义
-├── mihoyo/transport/MihoyoRequestTest.java← 空集合规整
-├── mihoyo/sign/DsSignerTest.java          ← 锁 DS 公式（用外部算出的 md5 向量）
-├── mihoyo/auth/CookieParserTest.java
-└── mihoyo/auth/passport/PassportDeviceTest.java / PassportClientTest.java
+src/test/java/...（25 个文件，覆盖 agent / channel / mihoyo；**adapter 仍未覆盖**）
+├── channel/TextChunkerTest.java           ← 切片：超长单行硬切 / 撞上限截断 / 不劈 emoji
+├── agent/memory/*                         ← 会话数上限 / 空闲 TTL / 落盘 / 配置兜底
+├── agent/tool/DecoyProfileTest.java       ← 诱饵 profile 的能力边界
+├── mihoyo/checkin/*                       ← 签到判定 / 记录落盘 / 通知文案 / Luna 客户端
+├── mihoyo/transport/*                     ← MockWebServer：retcode / header / POST 语义
+├── mihoyo/sign/DsSignerTest.java          ← 锁 DS 公式
+├── mihoyo/credential/*                    ← CookieJar / AccountStore / CredentialProvider
+└── mihoyo/auth/passport/*                 ← 扫码 / v2 换票
 
 src/main/resources/static/               ← 调试页（零构建、无 CDN）
 ├── index.html                           ← 扫码绑定 + 对话 + 调试面板 + 新会话
@@ -101,13 +111,12 @@ src/main/resources/static/               ← 调试页（零构建、无 CDN）
 scripts/smoke-agent.ps1                ← 冒烟脚本（8 条用例，2026-11-07 重写；每条用例一个独立会话）
 scripts/smoke-memory.ps1               ← P7：记忆差分验收（同会话不重复调 / 无会话必调 / 跨会话隔离 / 窗口不涨）
 scripts/login-qr.ps1                   ← P9：建码 → 存 PNG → 轮询到 BOUND
-scripts/qq-bridge/QQBridge.java        ← P10 Step 0：OneBot → /agent 的一次性桥（单文件零依赖，--selftest 可离线自检）
 scripts/round1.md / round2.md          ← P3 两轮原始输出（历史证据，只读）
 scripts/round3.md / round3-decoy.md    ← 新契约下两种 profile 的实测结果（均 8/8）
 .env.example                           ← 配置模板；真实值只写 .env（已 gitignore）
 docs/ROADMAP.md                        ← 本文件
 docs/mihoyo-auth.md                    ← 登录/多用户设计稿；A/B 已落地（P9）
-docs/qq-inbound.md                     ← P10：QQ 入站设计（路线选择 / 边界 / 白名单 / Step 1 计划）
+docs/qq-inbound.md                     ← QQ 入站现状（官方机器人实现 / 配置 / 排障 / 下一步）
 ```
 
 接口：`GET /`（调试页：扫码绑定 + 会话对话）、`GET /chat?q=`（纯问答，对照组：无工具、无记忆）、
@@ -118,7 +127,7 @@ docs/qq-inbound.md                     ← P10：QQ 入站设计（路线选择 
 `GET /api/checkin/status`（今日结果 + 最近 7 天 + 是否该看一眼）、
 `GET /api/memory/{sessionId}`（窗口内容 + `expired` 标记）、`DELETE /api/memory/{sessionId}`（清空会话）
 
-**结构决策**：原计划放 `adapter.mihoyo`，实际改为顶层 `mihoyo/`。原因是后续会有多个入站适配器（http / onebot / console），把「外部系统客户端」提到顶层更好表达边界。约定：**`adapter` 只表示入站，`mihoyo` 表示出站**。
+**结构决策**：原计划放 `adapter.mihoyo`，实际改为顶层 `mihoyo/`。原因是后续会有多个入站适配器（http / qq / 将来 telegram），把「外部系统客户端」提到顶层更好表达边界。约定：**`adapter` 只表示入站，`mihoyo` 表示出站，`channel` 只放平台无关的会话管道**（切片已落，见 `TextChunker`）。
 
 ---
 
@@ -590,6 +599,9 @@ Invoke-RestMethod "http://localhost:8080/api/checkin/run?force=true" -Method Pos
 
 > 目标：入口从「浏览器 / curl」变成「QQ 里直接聊」。
 > 设计细节全部在 [`qq-inbound.md`](qq-inbound.md)，这里只放进度与两条硬规则。
+>
+> **2026-11-18：主线已切到 P11（官方机器人），本节保留为备选记录。** OneBot 桥已删除，
+> 但下面的白名单 / 群聊两条硬规则对两条路都成立。
 
 **可行性结论**：可行。卡点不是 QQ 协议，是「进程级单凭据」——所以第一版只能**自用私聊**。
 
@@ -609,17 +621,18 @@ Invoke-RestMethod "http://localhost:8080/api/checkin/run?force=true" -Method Pos
 - [x] P10-1 路线调研：查实官方场景限制（个人主体：频道 ✅ / 群 ❌ / 单聊 ❌）
 - [x] P10-2 边界确认：OneBot 属于 `adapter`（入站），Agent 层零改动；会话 id `qq:c2c:{id}` / `qq:group:{gid}:{uid}`
 - [x] P10-3 Step 0 桥：`scripts/qq-bridge/QQBridge.java`（WS + 最小 JSON + 虚拟线程，单文件零依赖）
+      **2026-11-18 已删除**——官方通道不需要它；需要时 `git show 3dcd255:scripts/qq-bridge/QQBridge.java`
 - [x] P10-4 离线自检：`--selftest` **24 项通过**（JSON 解析 / CQ 码剥离 / 切片不丢字 / 白名单矩阵 / 序列化往返 / 异常兜底文案）
 - [x] P10-4b 假服务端 E2E（脚手架未提交）：握手 → 陌生人被拦（0 帧）→ 白名单消息带 `qq:c2c:10001` 打到 `/agent`
       → 2000 字切 3 条（800/800/400）；agent 挂掉时回「【连不上 Agent】…」而不是 `null`；断线退避 3s→6s
-- [ ] P10-5 **实跑**：装 LLBot → 小号扫码 → 开 3001 → 私聊发「签到了吗」收到回复
-- [ ] P10-6 Step 1：抽 `AgentChatService`，落 `adapter/onebot`（同会话串行 + `qq.enabled=false` 默认关）
-- [ ] P10-7 进群的前置：P8 的 `@ToolMemoryId → userId → 凭据`；在此之前 `QQ_GROUP_MODE` 保持 `off`
+- [ ] P10-5 **实跑**：装 LLBot → 小号扫码 → 开 3001 → 私聊发「签到了吗」收到回复（**随 P10 降级搁置**）
+- [ ] P10-6 Step 1：落 `adapter/onebot`（**随 P10 降级搁置**；共用的 `AgentChatService` 已抽）
+- [ ] P10-7 进群的前置：P8 的 `@ToolMemoryId → userId → 凭据`；在此之前群聊一律不接
 
 **两条硬规则（写在这里，免得将来手滑）**
 
 1. `QQ_ALLOWLIST` 为空 = 谁都不回。**默认必须是拒绝**，不是「谁都能用」。
-2. 群聊打开后仍只回白名单，但**回复是发在群里的**——白名单挡的是「谁能触发」，挡不住「谁能看见」。
+2. 群聊事件现在直接忽略；将来打开也仍只回白名单，但**回复是发在群里的**——白名单挡的是「谁能触发」，挡不住「谁能看见」。
 
 **验收**：QQ 私聊里问「今天签到了吗」，回复与 `GET /api/checkin/status` 一致；
 再用一个**不在白名单**的号发同一句，必须没有任何回复（fail closed 的证据，不是"大概没收到"）。
@@ -652,10 +665,19 @@ Invoke-RestMethod "http://localhost:8080/api/checkin/run?force=true" -Method Pos
 - 主动消息受频控且有权限门槛（错误码 `40034105`），**别把它当推送通道**；签到通知仍走独立 webhook
 
 - [ ] P11-1 注册个人开发者 + 创建机器人，拿 AppID/AppSecret，事件订阅切 WebSocket
+      （代码只认 `QQ_APP_ID` / `QQ_APP_SECRET`；是否已配好以 `.env` 为准）
 - [ ] P11-2 「开发设置」把自己加成开发体验用户，手机 QQ 扫码加机器人
-- [ ] P11-3 抽 `AgentChatService`（P10/P11 共用；也是 P10-6 的前置）
-- [ ] P11-4 落 `adapter/qqofficial`：AccessToken 刷新 + WS 握手/心跳/重连 + C2C 事件 → 被动回复
+- [x] P11-3 抽 `AgentChatService`（P10/P11 共用；也是 P10-6 的前置）
+- [x] P11-4 落 `adapter/qq`：AccessToken 刷新 + WS 握手/心跳/重连 + C2C 事件 → 被动回复
+      （包名最终是 `adapter/qq`，不是这里原写的 `adapter/qqofficial`；接第二个平台时若觉得歧义再改，此刻改名最便宜）
+- [x] P11-4b 出站收口第一刀：切片抽成 `channel/TextChunker`（修掉「超长单行被平台拒」和「撞 4 条丢尾」两个 bug）；
+      签到结果接上 `Notifier`（默认关，开了才发）
 - [ ] P11-5 真机验收：手机发「签到了吗」5 秒内收到；白名单外的 openid 不回
+
+**下一步（Step 1，等第二个平台真要接时再做）**：把 `QqBotDispatcher` 里的
+白名单 / 去重 / 会话 id / 同会话串行 / 错误文案提成 `channel.MessagePipeline`，
+出站收口成 `ReplySender`，QQ 适配器退化成「协议翻译」两件套。
+现在不做——**用第二个实现验证抽象**，别对着一个实现提前设计。
 
 **验收**：手机 QQ 里问一句，回复与 `GET /api/checkin/status` 一致；断网重连后仍能收消息。
 

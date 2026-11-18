@@ -1,5 +1,6 @@
 package com.luobo.hoyoagent.mihoyo.checkin;
 
+import com.luobo.hoyoagent.agent.notify.Notifier;
 import com.luobo.hoyoagent.mihoyo.credential.CredentialProvider;
 import com.luobo.hoyoagent.mihoyo.error.ErrorKind;
 import jakarta.annotation.PostConstruct;
@@ -32,6 +33,8 @@ import java.util.concurrent.locks.ReentrantLock;
  *       启动后 {@code hoyo.checkin.startup-delay}（默认 60s）补一次，今天已经有 DONE 记录就跳过。</li>
  *   <li><b>所有失败都走同一个前缀</b> {@link #ALERT}，日志里搜一次就能捞出来；
  *       同时写记录文件，重启后 {@code /api/checkin/status} 还能看见。</li>
+ *   <li><b>结果顺带推给 {@link Notifier}</b>（默认关，{@code hoyo.notify.enabled=true} 才发）：
+ *       推送失败只打日志，不影响签到结果。</li>
  * </ol>
  *
  * <p>单用户假设：记录按日期一个文件，和 {@link CredentialProvider} 只认一个账号一致。
@@ -61,6 +64,9 @@ public class CheckinScheduler {
 
     private final CredentialProvider credentials;
 
+    /** 出站通知：默认关（hoyo.notify.enabled=false），关着时是 NOOP 之外的一个空实现，不影响签到。 */
+    private final Notifier notifier;
+
     private final String userId;
 
     private final boolean enabled;
@@ -80,6 +86,7 @@ public class CheckinScheduler {
     public CheckinScheduler(CheckinService checkin,
                             CheckinRecordStore records,
                             CredentialProvider credentials,
+                            Notifier notifier,
                             @Value("${hoyo.user-id:local}") String userId,
                             @Value("${hoyo.checkin.enabled:true}") boolean enabled,
                             @Value("${hoyo.checkin.cron:0 10 0 * * *}") String cron,
@@ -88,6 +95,7 @@ public class CheckinScheduler {
         this.checkin = checkin;
         this.records = records;
         this.credentials = credentials;
+        this.notifier = notifier;
         this.userId = userId;
         this.enabled = enabled;
         this.cron = cron;
@@ -209,7 +217,21 @@ public class CheckinScheduler {
         } else {
             log.info("[CHECKIN] 完成 {}：{}", trigger, message);
         }
+
+        notifyQuietly(record);
         return record;
+    }
+
+    /**
+     * 通知是旁路：发送失败不能影响签到结果，更不能让已经落盘的记录被当成"没跑过"。
+     * 接口契约上 {@link Notifier} 自己吞异常，但这里再包一层——契约不该依赖实现。
+     */
+    private void notifyQuietly(CheckinRecord record) {
+        try {
+            notifier.send(CheckinMessages.of(record));
+        } catch (RuntimeException e) {
+            log.warn("[CHECKIN] 通知发送异常（不影响签到）：{}", e.toString());
+        }
     }
 
     /** 全部角色都新签/本来签过才算 DONE；空结果（读不到角色）算失败。 */

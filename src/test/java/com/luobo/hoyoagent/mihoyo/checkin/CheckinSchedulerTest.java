@@ -1,10 +1,13 @@
 package com.luobo.hoyoagent.mihoyo.checkin;
 
+import com.luobo.hoyoagent.agent.notify.Notification;
+import com.luobo.hoyoagent.agent.notify.Notifier;
 import com.luobo.hoyoagent.mihoyo.credential.CredentialProvider;
 import com.luobo.hoyoagent.mihoyo.error.ErrorKind;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.mockito.ArgumentCaptor;
 import tools.jackson.databind.json.JsonMapper;
 
 import java.nio.file.Path;
@@ -16,6 +19,8 @@ import java.util.List;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -45,6 +50,8 @@ class CheckinSchedulerTest {
 
     private CredentialProvider credentials;
 
+    private Notifier notifier;
+
     private CheckinScheduler scheduler;
 
     @BeforeEach
@@ -52,8 +59,9 @@ class CheckinSchedulerTest {
         checkin = mock(CheckinService.class);
         store = new CheckinRecordStore(dir, JsonMapper.builder().build());
         credentials = mock(CredentialProvider.class);
+        notifier = mock(Notifier.class);
         when(credentials.isPresent()).thenReturn(true);
-        scheduler = new CheckinScheduler(checkin, store, credentials, "local", true, CRON,
+        scheduler = new CheckinScheduler(checkin, store, credentials, notifier, "local", true, CRON,
                 "Asia/Shanghai", Duration.ofSeconds(0));
     }
 
@@ -172,7 +180,7 @@ class CheckinSchedulerTest {
 
     @Test
     void disabledSchedulerSkipsCronButStillAllowsManualRuns() {
-        CheckinScheduler disabled = new CheckinScheduler(checkin, store, credentials, "local", false,
+        CheckinScheduler disabled = new CheckinScheduler(checkin, store, credentials, notifier, "local", false,
                 CRON, "Asia/Shanghai", Duration.ofSeconds(0));
 
         assertThat(disabled.run(CheckinRecord.Trigger.SCHEDULED)).isNull();
@@ -245,6 +253,45 @@ class CheckinSchedulerTest {
         assertThat(status.today().done()).isTrue();
         assertThat(status.needsAttention()).isFalse();
         assertThat(status.recent()).hasSize(1);
+    }
+
+    @Test
+    void publishedNotificationCarriesTheOutcome() {
+        when(checkin.checkinAll()).thenReturn(new CheckinService.Summary(
+                List.of(role("SIGNED")), "1 个角色：新签 1"));
+
+        scheduler.run(CheckinRecord.Trigger.SCHEDULED);
+
+        ArgumentCaptor<Notification> sent = ArgumentCaptor.forClass(Notification.class);
+        verify(notifier).send(sent.capture());
+        assertThat(sent.getValue().level()).isEqualTo(Notification.Level.INFO);
+        assertThat(sent.getValue().title()).contains("完成");
+        assertThat(sent.getValue().text()).contains("新签 1");
+    }
+
+    @Test
+    void failedCheckinIsPublishedAsError() {
+        when(checkin.checkinAll()).thenReturn(new CheckinService.Summary(
+                List.of(), "读取绑定角色失败：登录状态失效", ErrorKind.AUTH));
+
+        scheduler.run(CheckinRecord.Trigger.SCHEDULED);
+
+        ArgumentCaptor<Notification> sent = ArgumentCaptor.forClass(Notification.class);
+        verify(notifier).send(sent.capture());
+        assertThat(sent.getValue().level()).isEqualTo(Notification.Level.ERROR);
+        assertThat(sent.getValue().title()).contains("失败");
+    }
+
+    @Test
+    void notificationFailureDoesNotBreakTheCheckin() {
+        when(checkin.checkinAll()).thenReturn(new CheckinService.Summary(
+                List.of(role("SIGNED")), "1 个角色：新签 1"));
+        doThrow(new IllegalStateException("webhook down")).when(notifier).send(any());
+
+        CheckinRecord record = scheduler.run(CheckinRecord.Trigger.SCHEDULED);
+
+        assertThat(record.outcome()).isEqualTo(CheckinRecord.Outcome.DONE);
+        assertThat(store.find(today())).contains(record);
     }
 
     private void saveToday(CheckinRecord.Outcome outcome) {

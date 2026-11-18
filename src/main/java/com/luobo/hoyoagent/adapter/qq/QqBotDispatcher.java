@@ -1,12 +1,12 @@
 package com.luobo.hoyoagent.adapter.qq;
 
 import com.luobo.hoyoagent.agent.AgentChatService;
+import com.luobo.hoyoagent.channel.TextChunker;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 import tools.jackson.databind.JsonNode;
 
-import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -40,9 +40,11 @@ public class QqBotDispatcher {
     }
 
     public void onEvent(String type, JsonNode d) {
-        log.info("[QQ] 事件 t={}", type);          // ← 临时诊断：先看平台到底推没推
+        // 群聊事件（GROUP_AT_MESSAGE_CREATE）暂不接：白名单只挡"谁能触发"，挡不住"谁能看见"，
+        // 见 docs/qq-inbound.md §4
         if (!"C2C_MESSAGE_CREATE".equals(type)) {
-            return;                     // 群聊事件先不接，见文档 §7
+            log.debug("[QQ] 忽略事件 t={}", type);
+            return;
         }
         workers.execute(() -> handle(d));
     }
@@ -83,41 +85,23 @@ public class QqBotDispatcher {
             reply = "（模型没有返回内容）";
         }
 
-        List<String> chunks = split(reply, props.replyChunkChars(), props.maxReplies());
+        List<String> chunks = TextChunker.split(reply, props.replyChunkChars(), props.maxReplies());
+        int sent = 0;
         for (int i = 0; i < chunks.size(); i++) {
-            api.sendC2c(openid, chunks.get(i), msgId, i + 1);   // msg_seq 从 1 开始
+            try {
+                if (api.sendC2c(openid, chunks.get(i), msgId, i + 1)) {   // msg_seq 从 1 开始
+                    sent++;
+                }
+            } catch (RuntimeException e) {
+                // 单条失败不拖累后面几条：网络抖动时用户至少能收到前半段
+                log.warn("[QQ] 第 {} 条发送失败：{}", i + 1, e.toString());
+            }
         }
-        log.info("[QQ] → {} 回复 {} 字，{} 条", mask(openid), reply.length(), chunks.size());
+        log.info("[QQ] → {} 回复 {} 字，{} 条（成功 {}）", mask(openid), reply.length(), chunks.size(), sent);
     }
 
     private synchronized boolean markSeen(String msgId) {
         return seen.put(msgId, Boolean.TRUE) == null;
-    }
-
-    private static List<String> split(String text, int maxChars, int maxParts) {
-        List<String> out = new ArrayList<>();
-        StringBuilder current = new StringBuilder();
-        for (String line : text.split("\n", -1)) {
-            if (current.length() + line.length() + 1 > maxChars && current.length() > 0) {
-                out.add(current.toString());
-                current.setLength(0);
-            }
-            if (current.length() > 0) {
-                current.append('\n');
-            }
-            current.append(line);
-            if (out.size() >= maxParts) {        // 平台每条消息最多回 4 次
-                break;
-            }
-        }
-        if (current.length() > 0) {
-            out.add(current.toString());
-        }
-        if (out.size() > maxParts) {
-            out = new ArrayList<>(out.subList(0, maxParts));
-            out.set(maxParts - 1, out.get(maxParts - 1) + "\n（太长了，先发这些）");
-        }
-        return out;
     }
 
     private static String mask(String id) {
