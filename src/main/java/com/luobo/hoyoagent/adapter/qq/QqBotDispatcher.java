@@ -62,17 +62,20 @@ public class QqBotDispatcher {
             return;
         }
         if (!props.allowlist().contains(openid)) {
-            // 第一次跑一定会走到这里——日志里的 openid 就是要填进 QQ_ALLOWLIST 的值
-            log.info("[QQ] 忽略：openid={} 不在白名单", mask(openid));
+            // 第一次跑一定会走到这里，而这一行是"该往 QQ_ALLOWLIST 里填什么"的唯一来源，
+            // 所以**故意不掩码**：掩掉之后人就没法照着抄，机器人永远配不通。
+            // openid 不是凭据（没有 AppSecret 拿它发不出消息），泄露风险远小于"配不通"。
+            log.info("[QQ] 不在白名单：openid={}（把整串值填进 QQ_ALLOWLIST{}）",
+                    openid, props.allowlist().isEmpty() ? "；当前白名单为空" : "");
             return;
         }
         if (!markSeen(msgId)) {
-            log.info("[QQ] 忽略：重复事件 msgId={}", mask(msgId));
+            log.info("[QQ] 忽略：重复事件 msgId={}", QqBotProperties.mask(msgId));
             return;
         }
 
         String sessionId = "qqbot:c2c:" + openid;
-        log.info("[QQ] ← {} [{}] {}", mask(openid), sessionId, abbreviate(text));
+        log.info("[QQ] ← {} [{}] {}", QqBotProperties.mask(openid), sessionId, abbreviate(text));
 
         String reply;
         try {
@@ -97,15 +100,11 @@ public class QqBotDispatcher {
                 log.warn("[QQ] 第 {} 条发送失败：{}", i + 1, e.toString());
             }
         }
-        log.info("[QQ] → {} 回复 {} 字，{} 条（成功 {}）", mask(openid), reply.length(), chunks.size(), sent);
+        log.info("[QQ] → {} 回复 {} 字，{} 条（成功 {}）", QqBotProperties.mask(openid), reply.length(), chunks.size(), sent);
     }
 
     private synchronized boolean markSeen(String msgId) {
         return seen.put(msgId, Boolean.TRUE) == null;
-    }
-
-    private static String mask(String id) {
-        return id.length() <= 8 ? "***" : id.substring(0, 4) + "***" + id.substring(id.length() - 4);
     }
 
     private static String abbreviate(String text) {

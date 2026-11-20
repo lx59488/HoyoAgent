@@ -2,7 +2,7 @@
 
 > 目标：入口从「浏览器 / curl」变成「QQ 里直接聊」。
 > 本文记录**为什么是这条路**、**当前实现长什么样**、**边界在哪**、**还差什么**。
-> 最后更新：2026-11-18（官方机器人已落地 `adapter/qq`；OneBot Step 0 桥已删除，见 §9）
+> 最后更新：2026-11-20（官方机器人已落地 `adapter/qq`；白名单首次配置改成「日志里抄完整 openid」，见 §4）
 
 ---
 
@@ -57,7 +57,8 @@
 - 私聊：`qqbot:c2c:{openid}` —— 一个人一段上下文
 - 群聊（未接）：`qqbot:group:{groupOpenid}:{userOpenid}` —— **不能**用群号当 id，
   否则全群共用一段对话，甲问完乙接着答
-- 日志一律 `mask()`；不打印完整 openid / msgId
+- 日志默认 `mask()`；**唯一例外**是「不在白名单」那一行，它故意打印完整 openid——
+  那是首次配置时唯一的值来源，掩掉就永远配不通（openid 不是凭据，见 §4）
 
 > ⚠️ 旧文档写的是 `qq:c2c:{id}`，代码实际是 `qqbot:c2c:`。**改前缀会让 `~/.hoyo/memory` 里的旧会话对不上**，
 > 等于丢历史；要么现在就改（只有自己在用，代价最小），要么以后别再改。
@@ -68,8 +69,19 @@
 |---|---|---|
 | `QQ_BOT_ENABLED` | `false` | 默认关：没凭据也能正常启动，签到调度照跑 |
 | `QQ_APP_ID` / `QQ_APP_SECRET` | 空 | 开放平台 → 开发设置 |
-| `QQ_ALLOWLIST` | 空 | **openid**（不是 QQ 号），逗号分隔；空 = 谁都不回 |
+| `QQ_ALLOWLIST` | 空 | **openid**（不是 QQ 号），逗号分隔；空 = 谁都不回。填纯数字会在启动时被警告——本通道事件里根本没有 QQ 号 |
 | `QQ_API_BASE` | `https://api.sgroup.qq.com` | 沙箱 `https://sandbox.api.sgroup.qq.com` |
+
+### 白名单怎么拿到值（首次配置的唯一路径）
+
+1. 把 `QQ_ALLOWLIST` 留空启动、手机给机器人发一条任意消息；
+2. 日志里会有一行 `[QQ] 不在白名单：openid=xxxx…`，**这一行不掩码**，整串复制；
+3. 填回 `.env` 的 `QQ_ALLOWLIST=`，重启。之后再收到陌生人的消息也只会打印他的 openid——那是他的，不是你的。
+
+不要试图填 QQ 号：`C2C_MESSAGE_CREATE` 事件里只有 `author.user_openid`，出站也是
+`POST /v2/users/{openid}/messages`，平台没有任何 openid ↔ QQ 号 的换算接口。
+填 QQ 号的直接后果是白名单永远不命中（fail closed），机器人一条也不回。
+另外 `user_openid` 是**按机器人隔离**的，换 AppID 重建机器人后值会变，白名单得重新填。
 
 `max-replies` / `reply-chunk-chars` 写在 [`application.yml`](../src/main/resources/application.yml)，
 不走环境变量：前者是平台硬上限，后者调错了只会让消息更碎。
@@ -90,8 +102,9 @@
 |---|---|
 | 启动日志 `[QQ] 未启用` | `QQ_BOT_ENABLED` 还是 false |
 | `[QQ] 缺 QQ_APP_ID / QQ_APP_SECRET` | 凭据没进环境（`.env` 是否在仓库根目录） |
-| `[QQ] QQ_ALLOWLIST 为空` | 这是 fail closed，所有消息都会被忽略 |
-| 连上了但不回 | 日志搜「不在白名单」，里面那个 openid 就是要填进 `QQ_ALLOWLIST` 的值 |
+| `[QQ] QQ_ALLOWLIST 为空` | 这是 fail closed，所有消息都会被忽略；照 §4「白名单怎么拿到值」走一遍 |
+| `[QQ] 白名单条目 … 是纯数字，像是 QQ 号` | 填错了：本通道只认 openid，见 §4 |
+| 连上了但不回 | 日志搜「不在白名单」，那一行里的 openid **是完整值**（不掩码），整串填进 `QQ_ALLOWLIST` |
 | 回「【出错了】…」 | Agent/模型报错，看同时间点的服务端日志 |
 | `[QQ] 401，换 token 后重试` 之后仍失败 | AppSecret 错了，或机器人被停用 |
 | `[QQ] 网关断开` 反复出现 | 本机网络/代理问题；退避会从 2s 涨到 60s |

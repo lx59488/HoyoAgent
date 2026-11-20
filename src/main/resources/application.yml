@@ -52,7 +52,7 @@ qq:
   enabled: ${QQ_BOT_ENABLED:false}          # 默认关：没凭据也能正常启动
   app-id: ${QQ_APP_ID:}
   client-secret: ${QQ_APP_SECRET:}
-  allowlist: ${QQ_ALLOWLIST:}               # 存 openid（不是 QQ 号），逗号分隔；空 = 谁都不回
+  allowlist: ${QQ_ALLOWLIST:}               # 存 openid（不是 QQ 号，纯数字会被启动时警告），逗号分隔；空 = 谁都不回
   api-base: ${QQ_API_BASE:https://api.sgroup.qq.com}   # 沙箱是 https://sandbox.api.sgroup.qq.com
   max-replies: 4                            # 平台硬上限：同一 msg_id 最多回 4 条
   reply-chunk-chars: 600
