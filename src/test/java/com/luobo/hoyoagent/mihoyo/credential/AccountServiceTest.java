@@ -80,4 +80,25 @@ class AccountServiceTest {
         assertThat(service.isBound("qq:someone")).isFalse();
         assertThat(service.all()).isEmpty();
     }
+
+    @Test
+    void claimRejectsUidOwnedByAnotherUser() {
+        AccountService service = new AccountService(store(), none(), "local", "");
+        service.save("qq:A", Credential.of("ltoken=a; ltuid=42"));
+
+        assertThatThrownBy(() -> service.claim("qq:B", Credential.of("ltoken=b; ltuid=42")))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("其他用户");
+        assertThat(service.find("qq:B")).isEmpty();
+    }
+
+    @Test
+    void claimAllowsSameUserToRebind() {
+        AccountService service = new AccountService(store(), none(), "local", "");
+        service.save("qq:A", Credential.of("stoken=old; mid=m; stuid=42"));
+
+        service.claim("qq:A", Credential.of("stoken=new; mid=m; stuid=42"));
+
+        assertThat(service.find("qq:A").orElseThrow().stoken()).isEqualTo("new");
+    }
 }

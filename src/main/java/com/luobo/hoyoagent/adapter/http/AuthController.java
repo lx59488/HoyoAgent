@@ -8,7 +8,9 @@ import com.google.zxing.common.BitMatrix;
 import com.luobo.hoyoagent.common.exception.BusinessException;
 import com.luobo.hoyoagent.common.exception.ErrorCode;
 import com.luobo.hoyoagent.common.result.Result;
+import com.luobo.hoyoagent.mihoyo.auth.QrImage;
 import com.luobo.hoyoagent.mihoyo.auth.QrLoginService;
+import com.luobo.hoyoagent.mihoyo.credential.AccountService;
 import com.luobo.hoyoagent.mihoyo.credential.Credential;
 import com.luobo.hoyoagent.mihoyo.credential.CredentialProvider;
 import com.luobo.hoyoagent.mihoyo.dto.GameRole;
@@ -48,10 +50,15 @@ public class AuthController {
 
     private final CredentialProvider credentials;
 
-    public AuthController(QrLoginService qrLogin, GameRoleService roleService, CredentialProvider credentials) {
+    private final AccountService accounts;
+
+
+    public AuthController(QrLoginService qrLogin, GameRoleService roleService,
+                          CredentialProvider credentials, AccountService accounts) {
         this.qrLogin = qrLogin;
         this.roleService = roleService;
         this.credentials = credentials;
+        this.accounts = accounts;
     }
 
     /** 当前绑定状态（给调试页用；不含任何凭据值）。 */
@@ -72,12 +79,12 @@ public class AuthController {
 
     @PostMapping("/qr")
     public Result<QrLoginService.Start> start() {
-        return Result.success(qrLogin.start());
+        return Result.success(qrLogin.start(accounts.localUserId()));
     }
 
     @GetMapping("/qr/{ticket}")
     public Result<QrLoginService.Status> status(@PathVariable String ticket) {
-        return Result.success(qrLogin.poll(ticket));
+        return Result.success(qrLogin.poll(accounts.localUserId(), ticket));
     }
 
     /** 当前凭据下绑定的游戏角色（调试用；不含凭据）。 */
@@ -86,34 +93,21 @@ public class AuthController {
         return Result.success(roleService.roles(credentials.get()));
     }
 
-    /** 静默刷新 v2 凭据（用已有 stoken 冒充手机，不需要扫码）。 */
     @PostMapping("/refresh")
     public Result<QrLoginService.RefreshResult> refresh() {
-        return Result.success(qrLogin.refreshV2());
+        return Result.success(qrLogin.refreshV2(accounts.localUserId()));
     }
 
     @GetMapping(value = "/qr/{ticket}/image", produces = MediaType.IMAGE_PNG_VALUE)
     public ResponseEntity<byte[]> image(@PathVariable String ticket) {
-        String url = qrLogin.qrUrl(ticket);
+        String url = qrLogin.qrUrl(accounts.localUserId(), ticket);
         if (url == null) {
             throw new BusinessException(ErrorCode.NOT_FOUND, "未知的登录会话");
         }
-        try {
-            BitMatrix matrix = new MultiFormatWriter().encode(
-                    url,
-                    BarcodeFormat.QR_CODE,
-                    360,
-                    360,
-                    Map.of(EncodeHintType.MARGIN, 1, EncodeHintType.CHARACTER_SET, "UTF-8"));
-            ByteArrayOutputStream out = new ByteArrayOutputStream();
-            MatrixToImageWriter.writeToStream(matrix, "PNG", out);
-            return ResponseEntity.ok()
-                    .cacheControl(CacheControl.noStore())
-                    .contentType(MediaType.IMAGE_PNG)
-                    .body(out.toByteArray());
-        } catch (Exception e) {
-            throw new BusinessException(ErrorCode.INTERNAL_ERROR, "二维码渲染失败");
-        }
+        return ResponseEntity.ok()
+                .cacheControl(CacheControl.noStore())
+                .contentType(MediaType.IMAGE_PNG)
+                .body(QrImage.png(url));
     }
 
     public record AuthStatus(String userId,

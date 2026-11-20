@@ -53,7 +53,7 @@ public class CheckinTool {
 
         CheckinService.Summary summary;
         try {
-            summary = checkinService.checkinAll();
+            summary = checkinService.checkinAll(accounts.require(userId));
         } catch (BusinessException e) {
             return "【结论】签到失败：" + e.getMessage();
         }

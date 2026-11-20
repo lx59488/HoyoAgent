@@ -147,5 +147,24 @@ public class AccountService {
                 : userId.substring(0, 4) + "***" + userId.substring(userId.length() - 4);
     }
 
+    /**
+     * 绑定/换绑的唯一入口：一个米游社账号只能属于一个平台用户。
+     *
+     * <p>为什么 {@code synchronized}：两个用户同时扫同一个号时，"查重 + 落盘"必须是一个原子动作，
+     * 否则两边都会通过查重。单进程足够，多实例要换成数据库唯一索引。
+     *
+     * <p>注意 {@link #save} 故意<b>不</b>做查重——它是底层写入，给刷新 v2 这类"uid 不会变"的场景用。
+     */
+    public synchronized void claim(String userId, Credential fresh) {
+        if (fresh == null || fresh.uid() == null || fresh.uid().isBlank()) {
+            throw new BusinessException(ErrorCode.BAD_REQUEST, "这个米游社账号没有 uid，无法绑定");
+        }
+        Optional<Account> owner = findByUid(fresh.uid());
+        if (owner.isPresent() && !owner.get().userId().equals(userId)) {
+            throw new BusinessException(ErrorCode.BAD_REQUEST, "这个米游社账号已经绑定了其他用户");
+        }
+        save(userId, fresh);
+    }
+
 
 }

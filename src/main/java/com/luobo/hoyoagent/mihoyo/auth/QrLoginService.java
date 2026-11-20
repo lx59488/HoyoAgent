@@ -33,35 +33,28 @@ public class QrLoginService {
 
     private static final Duration TTL = Duration.ofMinutes(3);
 
-    /** 从 web 确认码响应里只收这些凭据字段 */
-    private static final List<String> V2_KEYS = List.of(
-            "ltoken_v2", "ltuid_v2", "cookie_token_v2", "account_id_v2", "ltmid_v2", "stoken_v2");
-
     private final PassportClient passport;
-
-    private final CredentialProvider credentials;
 
     private final Map<String, Session> sessions = new ConcurrentHashMap<>();
 
     private final AccountService accounts;
 
-    public QrLoginService(PassportClient passport, CredentialProvider credentials, AccountService accounts) {
+    public QrLoginService(PassportClient passport, AccountService accounts) {
         this.passport = passport;
-        this.credentials = credentials;
         this.accounts = accounts;
     }
 
-    public Start start() {
+    public Start start(String ownerId) {
         purgeExpired();
         PassportClient.QrTicket ticket = passport.createAppQrLogin();
-        Session session = new Session(ticket.ticket(), ticket.url(), Instant.now());
+        Session session = new Session(ticket.ticket(), ticket.url(), Instant.now(), ownerId);
         sessions.put(ticket.ticket(), session);
         log.info("已创建登录二维码，ticket={}", shortTicket(ticket.ticket()));
         return new Start(ticket.ticket(), ticket.url(), TTL.toSeconds(), session.state);
     }
 
-    public Status poll(String ticket) {
-        Session session = sessions.get(ticket);
+    public Status poll(String ownerId, String ticket) {
+        Session session = requireOwned(ownerId, ticket);
         if (session == null) {
             throw new BusinessException(ErrorCode.BAD_REQUEST, "未知的登录会话，请重新获取二维码");
         }
@@ -93,10 +86,19 @@ public class QrLoginService {
         return session.status();
     }
 
-    /** 给二维码图片用；会话不存在返回 null。 */
-    public String qrUrl(String ticket) {
+    /** 给二维码图片用；会话不存在或不属于调用方返回 null。 */
+    public String qrUrl(String ownerId, String ticket) {
         Session session = sessions.get(ticket);
-        return session == null ? null : session.url;
+        return session == null || !session.ownerId.equals(ownerId) ? null : session.url;
+    }
+
+    private Session requireOwned(String ownerId, String ticket) {
+        Session session = sessions.get(ticket);
+        // 不区分"不存在"和"不是你的"：两者都回同一句，别泄露别人开过码
+        if (session == null || !session.ownerId.equals(ownerId)) {
+            throw new BusinessException(ErrorCode.BAD_REQUEST, "未知的登录会话，请重新获取二维码");
+        }
+        return session;
     }
 
     /**
@@ -105,16 +107,15 @@ public class QrLoginService {
      * <p>典型场景：签到一直正常（v1 cookie_token 就够），但查角色突然 {@code 5003}——
      * 那就是 {@code ltoken_v2} 过期了，调一次这里即可。
      */
-    public RefreshResult refreshV2() {
-        Credential current = credentials.get();
-        if (current == null || !current.hasStoken()
-                || current.mid() == null || current.mid().isBlank()) {
+    public RefreshResult refreshV2(String ownerId) {
+        Credential current = accounts.find(ownerId).orElseThrow(() ->
+                new BusinessException(ErrorCode.MOYO_AUTH_EXPIRED, "当前账号未绑定，请先扫码"));
+        if (!current.hasStoken() || current.mid() == null || current.mid().isBlank()) {
             throw new BusinessException(ErrorCode.MOYO_AUTH_EXPIRED, "当前凭据缺少 stoken/mid，请重新扫码绑定");
         }
         CookieJar v2 = passport.exchangeV2(current.stoken(), current.mid());
         CookieJar merged = current.cookies().merge(v2);
         Credential refreshed  = current.withCookies(merged);
-        credentials.update(refreshed);
         accounts.save(accounts.localUserId(), refreshed); // 同上
         return new RefreshResult(merged.has("ltoken_v2"), merged.has("cookie_token_v2"),
                 merged.has("ltoken_v2") ? "v2 凭据已刷新" : "刷新成功，但响应里没有 ltoken_v2");
@@ -158,9 +159,13 @@ public class QrLoginService {
                 .with("cookie_token", cookieToken.token()).with("account_id", aid)
                 .merge(v2);
         Credential fresh = new Credential(jar, aid, mid, stoken);
-        credentials.update(fresh);
-        accounts.save(accounts.localUserId(), fresh);     // 临时双写：M2 会只剩这一行
-
+        try {
+            accounts.claim(session.ownerId, fresh);        // uid 查重在这里，不是 save
+        } catch (BusinessException e) {
+            session.finish("FAILED", e.getMessage());
+            log.warn("绑定被拒绝: uid={} reason={}", aid, e.getMessage());
+            return;
+        }
         session.uid = aid;
         session.mid = mid;
         session.hasStoken = true;
@@ -242,10 +247,13 @@ public class QrLoginService {
 
         private boolean exchanged;
 
-        private Session(String ticket, String url, Instant createdAt) {
+        private final String ownerId;
+
+        private Session(String ticket, String url, Instant createdAt, String ownerId) {
             this.ticket = ticket;
             this.url = url;
             this.createdAt = createdAt;
+            this.ownerId = ownerId;
         }
 
         private boolean isExpired() {
