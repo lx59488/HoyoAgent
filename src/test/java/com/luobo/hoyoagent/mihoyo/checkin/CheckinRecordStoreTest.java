@@ -45,7 +45,7 @@ class CheckinRecordStoreTest {
 
         store.save(record);
 
-        CheckinRecord loaded = store.find("2026-11-13").orElseThrow();
+        CheckinRecord loaded = store.find("local", "2026-11-13").orElseThrow();
         assertThat(loaded.userId()).isEqualTo("local");
         assertThat(loaded.outcome()).isEqualTo(CheckinRecord.Outcome.PARTIAL);
         assertThat(loaded.trigger()).isEqualTo(CheckinRecord.Trigger.SCHEDULED);
@@ -62,7 +62,7 @@ class CheckinRecordStoreTest {
         store.save(record("2026-11-13", CheckinRecord.Outcome.DONE));
         store.save(record("2026-11-13", CheckinRecord.Outcome.FAILED));
 
-        assertThat(store.find("2026-11-13").orElseThrow().outcome())
+        assertThat(store.find("local","2026-11-13").orElseThrow().outcome())
                 .isEqualTo(CheckinRecord.Outcome.FAILED);
         try (Stream<Path> files = Files.list(dir)) {
             assertThat(files.count()).isEqualTo(1);
@@ -74,13 +74,13 @@ class CheckinRecordStoreTest {
         Files.createDirectories(dir);
         Files.writeString(dir.resolve("2026-11-13.json"), "{ 这不是 JSON", StandardCharsets.UTF_8);
 
-        assertThat(store.find("2026-11-13")).isEmpty();
+        assertThat(store.find("local", "2026-11-13")).isEmpty();
     }
 
     @Test
     void missingDirectoryIsEmptyNotAnError() {
-        assertThat(store.find("2026-11-13")).isEmpty();
-        assertThat(store.recent(7)).isEmpty();
+        assertThat(store.find("local", "2026-11-13")).isEmpty();
+        assertThat(store.recent("local", 7)).isEmpty();
     }
 
     @Test
@@ -89,9 +89,9 @@ class CheckinRecordStoreTest {
         store.save(record("2026-11-12", CheckinRecord.Outcome.FAILED));
         store.save(record("2026-11-10", CheckinRecord.Outcome.DONE));
 
-        assertThat(store.recent(2)).extracting(CheckinRecord::date)
+        assertThat(store.recent("local", 2)).extracting(CheckinRecord::date)
                 .containsExactly("2026-11-12", "2026-11-10");
-        assertThat(store.recent(10)).hasSize(3);
+        assertThat(store.recent("local", 10)).hasSize(3);
     }
 
     @Test
@@ -101,6 +101,17 @@ class CheckinRecordStoreTest {
                 "2026-11-13T12:00:00+08:00", "2026-11-13T12:00:00+08:00", "未绑定", null);
 
         assertThat(record.roles()).isEmpty();
+    }
+
+    @Test
+    void differentUsersDoNotOverwriteEachOther() {
+        store.save(new CheckinRecord("qq:A", "2026-11-20", CheckinRecord.Trigger.SCHEDULED,
+                CheckinRecord.Outcome.DONE, null, null, null, "A 完成", List.of()));
+        store.save(new CheckinRecord("qq:B", "2026-11-20", CheckinRecord.Trigger.SCHEDULED,
+                CheckinRecord.Outcome.FAILED, null, null, null, "B 失败", List.of()));
+
+        assertThat(store.find("qq:A", "2026-11-20").orElseThrow().message()).isEqualTo("A 完成");
+        assertThat(store.find("qq:B", "2026-11-20").orElseThrow().message()).isEqualTo("B 失败");
     }
 
     private static CheckinRecord record(String date, CheckinRecord.Outcome outcome) {

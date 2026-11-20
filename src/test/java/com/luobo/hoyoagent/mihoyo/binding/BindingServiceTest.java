@@ -2,6 +2,7 @@ package com.luobo.hoyoagent.mihoyo.binding;
 
 import com.luobo.hoyoagent.common.exception.BusinessException;
 import com.luobo.hoyoagent.mihoyo.auth.QrLoginService;
+import com.luobo.hoyoagent.mihoyo.checkin.CheckinRecordStore;
 import com.luobo.hoyoagent.mihoyo.credential.AccountService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -19,11 +20,15 @@ class BindingServiceTest {
 
     private BindingService service;
 
+    private CheckinRecordStore records;
+
+
     @BeforeEach
     void setUp() {
         qrLogin = mock(QrLoginService.class);
         accounts = mock(AccountService.class);
-        service = new BindingService(qrLogin, accounts);
+        records = mock(CheckinRecordStore.class);
+        service = new BindingService(qrLogin, accounts, records);
     }
 
     @Test

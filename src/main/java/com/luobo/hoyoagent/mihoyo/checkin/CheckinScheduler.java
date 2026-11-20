@@ -1,7 +1,9 @@
 package com.luobo.hoyoagent.mihoyo.checkin;
 
 import com.luobo.hoyoagent.agent.notify.Notifier;
-import com.luobo.hoyoagent.mihoyo.credential.CredentialProvider;
+import com.luobo.hoyoagent.mihoyo.credential.Account;
+import com.luobo.hoyoagent.mihoyo.credential.AccountService;
+import com.luobo.hoyoagent.mihoyo.credential.Credential;
 import com.luobo.hoyoagent.mihoyo.error.ErrorKind;
 import jakarta.annotation.PostConstruct;
 import org.slf4j.Logger;
@@ -18,8 +20,12 @@ import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneId;
 import java.time.ZonedDateTime;
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.Optional;
+import java.util.concurrent.Semaphore;
+import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.locks.ReentrantLock;
 
 /**
@@ -37,8 +43,9 @@ import java.util.concurrent.locks.ReentrantLock;
  *       推送失败只打日志，不影响签到结果。</li>
  * </ol>
  *
- * <p>单用户假设：记录按日期一个文件，和 {@link CredentialProvider} 只认一个账号一致。
- * 多用户时按 userId 分目录（或上库），{@link CheckinRecord#userId()} 已经先写进文件了。
+ * <p>多用户：定时任务走 {@link #runAll}，遍历 {@link AccountService#all()}，每人各自判定
+ * "今天是不是已经 DONE"；记录按 userId 分目录（见 {@link CheckinRecordStore}）。
+ * {@link #run} 保留单账号语义，只服务网页调试口和单元测试。
  */
 @Component
 public class CheckinScheduler {
@@ -62,7 +69,7 @@ public class CheckinScheduler {
 
     private final CheckinRecordStore records;
 
-    private final CredentialProvider credentials;
+    private final AccountService accounts;
 
     /** 出站通知：默认关（hoyo.notify.enabled=false），关着时是 NOOP 之外的一个空实现，不影响签到。 */
     private final Notifier notifier;
@@ -80,12 +87,15 @@ public class CheckinScheduler {
     /** 定时与补签不能同时跑：两边都会真的发请求 */
     private final ReentrantLock lock = new ReentrantLock();
 
+    /** 账号之间最多 3 个并发：再多就是在给米游社刷风控。 */
+    private static final int MAX_CONCURRENT_ACCOUNTS = 3;
+
     /**
      * @param cron 注解里的默认值必须和这里一致——{@code @Scheduled} 读不到构造参数
      */
     public CheckinScheduler(CheckinService checkin,
                             CheckinRecordStore records,
-                            CredentialProvider credentials,
+                            AccountService accounts,
                             Notifier notifier,
                             @Value("${hoyo.user-id:local}") String userId,
                             @Value("${hoyo.checkin.enabled:true}") boolean enabled,
@@ -94,7 +104,7 @@ public class CheckinScheduler {
                             @Value("${hoyo.checkin.startup-delay:60s}") Duration startupDelay) {
         this.checkin = checkin;
         this.records = records;
-        this.credentials = credentials;
+        this.accounts = accounts;
         this.notifier = notifier;
         this.userId = userId;
         this.enabled = enabled;
@@ -105,9 +115,8 @@ public class CheckinScheduler {
 
     @Scheduled(cron = "${hoyo.checkin.cron:0 10 0 * * *}", zone = "${hoyo.checkin.zone:Asia/Shanghai}")
     public void daily() {
-        run(CheckinRecord.Trigger.SCHEDULED);
+        runAll(CheckinRecord.Trigger.SCHEDULED);
     }
-
     /**
      * 启动补签。放在虚拟线程里：线程是守护线程，测试 JVM 不会被它拖住，
      * 也不会把 {@code SpringApplication.run} 卡住（补签最长几秒）。
@@ -123,7 +132,7 @@ public class CheckinScheduler {
                 if (delay > 0) {
                     Thread.sleep(delay);
                 }
-                run(CheckinRecord.Trigger.STARTUP);
+                runAll(CheckinRecord.Trigger.STARTUP);
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
             } catch (RuntimeException e) {
@@ -132,20 +141,11 @@ public class CheckinScheduler {
         });
     }
 
-    /** 人主动触发：今天已经 DONE 就不重复请求（{@code force} 可强制重跑）。 */
-    public CheckinRecord runManual(boolean force) {
-        if (!force) {
-            Optional<CheckinRecord> today = todayRecord(LocalDate.now(zone).toString());
-            if (today.filter(CheckinRecord::done).isPresent()) {
-                log.info("[CHECKIN] 今天已经签过，未重复请求（force=true 可强制）");
-                return today.get();
-            }
-        }
-        return run(CheckinRecord.Trigger.MANUAL);
-    }
-
     /**
-     * @return 本次运行的记录；功能关闭或上一次还没跑完时返回 {@code null}
+     * 单账号入口：只跑 {@code hoyo.user-id} 那一个（网页调试页和单元测试用）。
+     *
+     * <p>定时任务走 {@link #runAll}——那里才是多用户。两个方法共用 {@link #execute}，
+     * 区别只在"跑谁"，不在"怎么跑"。
      */
     public CheckinRecord run(CheckinRecord.Trigger trigger) {
         if (trigger != CheckinRecord.Trigger.MANUAL && !enabled) {
@@ -163,35 +163,118 @@ public class CheckinScheduler {
                 log.info("[CHECKIN] 今天已签过（{}），跳过 {}", CheckinRecordStore.describe(today.get()), trigger);
                 return today.get();
             }
-            return execute(date, trigger);
+            Credential credential = accounts.find(userId).orElse(null);
+            return execute(userId, credential, date, trigger);
         } finally {
             lock.unlock();
         }
     }
 
-    private CheckinRecord execute(String date, CheckinRecord.Trigger trigger) {
+    /**
+     * 跑所有已绑定账号：账号间最多 3 并发，账号内串行（由 {@link CheckinService} 保证）。
+     *
+     * <p>每个账号各自判断"今天是不是已经 DONE"，所以某个人手动补跑过，不会拖累其他人。
+     */
+    public List<CheckinRecord> runAll(CheckinRecord.Trigger trigger) {
+        if (trigger != CheckinRecord.Trigger.MANUAL && !enabled) {
+            log.info("[CHECKIN] 定时签到已关闭（hoyo.checkin.enabled=false），跳过 {}", trigger);
+            return List.of();
+        }
+        if (!lock.tryLock()) {
+            log.warn("[CHECKIN] 上一次签到还没跑完，跳过本次 {}", trigger);
+            return List.of();
+        }
+        try {
+            String date = LocalDate.now(zone).toString();
+            List<Account> all = accounts.all();
+            if (all.isEmpty()) {
+                // 一个号都没绑：留一条记录，状态页才知道"跑过了，只是没东西可签"
+                return List.of(finish(userId, date, trigger, CheckinRecord.Outcome.SKIPPED, null,
+                        Instant.now(), "未绑定米游社账号：先扫码登录或填 HOYO_COOKIE", List.of()));
+            }
+
+            List<Account> pending = new ArrayList<>();
+            for (Account account : all) {
+                Optional<CheckinRecord> today = records.find(account.userId(), date);
+                if (trigger != CheckinRecord.Trigger.MANUAL && today.filter(CheckinRecord::done).isPresent()) {
+                    log.info("[CHECKIN] {} 今天已签过，跳过", mask(account.userId()));
+                    continue;
+                }
+                pending.add(account);
+            }
+            if (pending.isEmpty()) {
+                log.info("[CHECKIN] {} 个账号今天都已完成，跳过 {}", all.size(), trigger);
+                return List.of();
+            }
+
+            log.info("[CHECKIN] {} 开始：{} 个账号待签（共 {} 个）", trigger, pending.size(), all.size());
+            return runConcurrently(pending, date, trigger);
+        } finally {
+            lock.unlock();
+        }
+    }
+
+    /** 一个账号一个虚拟线程；信号量兜住并发上限。 */
+    private List<CheckinRecord> runConcurrently(List<Account> pending, String date,
+                                                CheckinRecord.Trigger trigger) {
+        List<CheckinRecord> results = Collections.synchronizedList(new ArrayList<>());
+        Semaphore permits = new Semaphore(MAX_CONCURRENT_ACCOUNTS);
+        List<Thread> threads = new ArrayList<>();
+
+        for (Account account : pending) {
+            threads.add(Thread.ofVirtual().name("checkin-" + mask(account.userId())).start(() -> {
+                try {
+                    permits.acquire();
+                    try {
+                        // 抖动：几个号同一毫秒打过去，看起来就像脚本
+                        sleep(ThreadLocalRandom.current().nextInt(0, 400));
+                        results.add(execute(account.userId(), account.credential(), date, trigger));
+                    } finally {
+                        permits.release();
+                    }
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                } catch (RuntimeException e) {
+                    log.error("{} {} 签到异常: user={} err={}",
+                            ALERT, trigger, mask(account.userId()), e.toString());
+                }
+            }));
+        }
+        for (Thread thread : threads) {
+            try {
+                thread.join();
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+        }
+        return List.copyOf(results);
+    }
+
+    private CheckinRecord execute(String userId, Credential credential, String date,
+                                  CheckinRecord.Trigger trigger) {
         Instant started = Instant.now();
 
-        if (!credentials.isPresent()) {
-            return finish(date, trigger, CheckinRecord.Outcome.SKIPPED, null, started,
+        if (credential == null || credential.cookieHeader() == null || credential.cookieHeader().isBlank()) {
+            return finish(userId, date, trigger, CheckinRecord.Outcome.SKIPPED, null, started,
                     "未绑定米游社账号：先扫码登录或填 HOYO_COOKIE", List.of());
         }
 
         CheckinService.Summary summary;
         try {
-            summary = checkin.checkinAll();
+            summary = checkin.checkinAll(credential);
         } catch (RuntimeException e) {
             log.error("{} {} 签到抛出异常: {}", ALERT, trigger, e.toString());
-            return finish(date, trigger, CheckinRecord.Outcome.FAILED, ErrorKind.UNKNOWN, started,
+            return finish(userId, date, trigger, CheckinRecord.Outcome.FAILED, ErrorKind.UNKNOWN, started,
                     "签到异常：" + e.getMessage(), List.of());
         }
 
         CheckinRecord.Outcome outcome = classify(summary.results());
         ErrorKind kind = summary.kind() == null ? worstKind(summary.results()) : summary.kind();
-        return finish(date, trigger, outcome, kind, started, summary.message(), summary.results());
+        return finish(userId, date, trigger, outcome, kind, started, summary.message(), summary.results());
     }
 
-    private CheckinRecord finish(String date,
+    private CheckinRecord finish(String userId,
+                                 String date,
                                  CheckinRecord.Trigger trigger,
                                  CheckinRecord.Outcome outcome,
                                  ErrorKind kind,
@@ -199,23 +282,18 @@ public class CheckinScheduler {
                                  String message,
                                  List<CheckinService.RoleResult> roles) {
         CheckinRecord record = new CheckinRecord(
-                userId,
-                date,
-                trigger,
-                outcome,
-                kind,
+                userId, date, trigger, outcome, kind,
                 started.atZone(zone).toOffsetDateTime().toString(),
                 Instant.now().atZone(zone).toOffsetDateTime().toString(),
-                message,
-                roles);
+                message, roles);
         records.save(record);
 
         if (record.attention()) {
-            log.error("{} {} 未完成（{}）：{}（kind={}）", ALERT, trigger, outcome, message, kind);
+            log.error("{} {} {} 未完成（{}）：{}（kind={}）", ALERT, mask(userId), trigger, outcome, message, kind);
         } else if (outcome == CheckinRecord.Outcome.SKIPPED) {
-            log.warn("[CHECKIN] 跳过签到：{}", message);
+            log.warn("[CHECKIN] {} 跳过签到：{}", mask(userId), message);
         } else {
-            log.info("[CHECKIN] 完成 {}：{}", trigger, message);
+            log.info("[CHECKIN] {} 完成 {}：{}", mask(userId), trigger, message);
         }
 
         notifyQuietly(record);
@@ -271,7 +349,7 @@ public class CheckinScheduler {
                 today.orElse(null),
                 attention != null,
                 attention,
-                records.recent(7));
+                records.recent(userId, 7));
     }
 
     /** @param now 由调用方给，测试才能锁住"还没到点"和"已经过点"两支 */
@@ -317,14 +395,44 @@ public class CheckinScheduler {
         return zone;
     }
 
-    /** 别把别人的记录当成自己的：文件名只有日期，userId 在文件里。 */
+    /** 记录按用户分目录后，这里只查自己的那份；旧文件的归属由 store 判定。 */
     private Optional<CheckinRecord> todayRecord(String date) {
-        Optional<CheckinRecord> found = records.find(date);
-        if (found.isPresent() && !userId.equals(found.get().userId())) {
-            log.warn("{} 的签到记录属于另一个 userId（{}），忽略", date, found.get().userId());
-            return Optional.empty();
+        return records.find(userId, date);
+    }
+
+
+    private static void sleep(long millis) {
+        try {
+            Thread.sleep(millis);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
         }
-        return found;
+    }
+
+    private static String mask(String userId) {
+        if (userId == null || userId.isBlank()) {
+            return "***";
+        }
+        return userId.length() <= 8 ? "***" : userId.substring(0, 4) + "***" + userId.substring(userId.length() - 4);
+    }
+
+
+    /**
+     * 手动补跑：跑所有账号。返回本地那条是为了兼容 {@code POST /api/checkin/run} 的响应，
+     * 全量结果留给 M6 的管理后台按用户展示。
+     */
+    public CheckinRecord runManual(boolean force) {
+        String date = LocalDate.now(zone).toString();
+        if (!force) {
+            Optional<CheckinRecord> today = todayRecord(date);
+            if (today.filter(CheckinRecord::done).isPresent()) {
+                log.info("[CHECKIN] 今天已经签过，未重复请求（force=true 可强制）");
+                return today.get();
+            }
+        }
+        List<CheckinRecord> results = runAll(CheckinRecord.Trigger.MANUAL);
+        return results.stream().filter(r -> userId.equals(r.userId())).findFirst()
+                .orElse(results.isEmpty() ? null : results.get(0));
     }
 
     /** 启动时把"到底会不会跑、下次几点"打进日志：比事后猜 cron 写没写对靠谱。 */

@@ -4,6 +4,7 @@ import com.luobo.hoyoagent.common.exception.BusinessException;
 import com.luobo.hoyoagent.common.exception.ErrorCode;
 import com.luobo.hoyoagent.mihoyo.auth.QrImage;
 import com.luobo.hoyoagent.mihoyo.auth.QrLoginService;
+import com.luobo.hoyoagent.mihoyo.checkin.CheckinRecordStore;
 import com.luobo.hoyoagent.mihoyo.credential.AccountService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -58,9 +59,13 @@ public class BindingService {
     /** 一个 ticket 只允许一个轮询线程，否则同一张码会回两条"绑定成功"。 */
     private final Set<String> polling = ConcurrentHashMap.newKeySet();
 
-    public BindingService(QrLoginService qrLogin, AccountService accounts) {
+    private final CheckinRecordStore records;
+
+
+    public BindingService(QrLoginService qrLogin, AccountService accounts, CheckinRecordStore records) {
         this.qrLogin = qrLogin;
         this.accounts = accounts;
+        this.records = records;
     }
 
     public Intent intentOf(String text) {
@@ -105,13 +110,13 @@ public class BindingService {
         polling.remove(ticket);
     }
 
-    /** 只删本地凭据；签到记录留到 M3 按 userId 分目录后再一起清。 */
+    /** 解绑：凭据 + 该用户的签到记录一起删（合规要求"删除账号必须清空数据"）。 */
     public boolean unbind(String userId) {
         boolean removed = accounts.delete(userId);
-        log.info("解绑 user={} removed={}", mask(userId), removed);
+        int cleared = records.deleteAll(userId);
+        log.info("解绑 user={} 凭据={} 签到记录={} 条", mask(userId), removed, cleared);
         return removed;
     }
-
     public record QrTicket(String ticket, byte[] png, long expiresInSeconds) {
     }
 

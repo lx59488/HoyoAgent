@@ -159,8 +159,7 @@ public class CheckinOverviewService {
 
     /** 本地记录只用于"最近 7 天"；按 userId 过滤，别把别人的记录当成自己的。 */
     private List<CheckinOverview.Recent> recent(String userId) {
-        return records.recent(7).stream()
-                .filter(r -> userId.equals(r.userId()))
+        return records.recent(userId, 7).stream()
                 .map(r -> new CheckinOverview.Recent(
                         r.date(),
                         r.trigger() == null ? "UNKNOWN" : r.trigger().name(),
