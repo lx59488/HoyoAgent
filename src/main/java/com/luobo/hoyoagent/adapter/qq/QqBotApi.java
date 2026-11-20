@@ -14,6 +14,7 @@ import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.Base64;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
@@ -99,6 +100,70 @@ public class QqBotApi {
         }
         if (resp.statusCode() != 200) {
             log.warn("[QQ] 发送失败 HTTP {}：{}", resp.statusCode(), snippet(resp.body()));
+            return false;
+        }
+        return true;
+    }
+
+    /**
+     * T0 验证用：把图片二进制直传给单聊富媒体接口，返回 file_info。
+     *
+     * <p>官方文档里 {@code file_data} 有 5MB 上限，我们的 PNG 只有几 KB。
+     * 失败直接抛：调用方（探针）要把原因带回 QQ，不能静默。
+     */
+    public String uploadImage(String openid, byte[] png, String fileName) {
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("file_type", 1);            // 1 = 图片
+        payload.put("file_name", fileName);
+        payload.put("file_data", Base64.getEncoder().encodeToString(png));
+        payload.put("srv_send_msg", false);     // 只上传，不占用主动消息
+
+        String url = props.apiBase() + "/v2/users/" + openid + "/files";
+        String body = mapper.writeValueAsString(payload);
+        HttpResponse<String> resp = post(url, accessToken(), body);
+
+        if (resp.statusCode() != 200) {
+            throw new IllegalStateException("上传图片失败 HTTP " + resp.statusCode()
+                    + "：" + snippet(resp.body()));
+        }
+        JsonNode node = mapper.readTree(resp.body());
+        String fileInfo = node.path("file_info").asString("");
+        if (fileInfo.isBlank()) {
+            throw new IllegalStateException("上传图片未返回 file_info：" + snippet(resp.body()));
+        }
+        log.info("[QQ] 图片已上传，{} 字节，ttl={}s", png.length, node.path("ttl").asInt(-1));
+        return fileInfo;
+    }
+
+    /**
+     * 被动回复一张图片：先上传拿 file_info，再发 msg_type=7。
+     *
+     * <p>注意：{@code msg_type=7} 时 {@code content} 必须给个非空值（官方已知问题，填个空格）。
+     */
+    public boolean sendC2cImage(String openid, byte[] png, String msgId, int seq) {
+        String fileName = "probe-" + System.currentTimeMillis() + ".png";
+        String fileInfo = uploadImage(openid, png, fileName);
+
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("content", " ");
+        payload.put("msg_type", 7);             // 7 = 富媒体
+        payload.put("media", Map.of("file_info", fileInfo));
+        payload.put("msg_id", msgId);
+        payload.put("msg_seq", seq);
+
+        String url = props.apiBase() + "/v2/users/" + openid + "/messages";
+        String body = mapper.writeValueAsString(payload);
+        HttpResponse<String> resp = post(url, accessToken(), body);
+
+        if (resp.statusCode() == 401) {
+            log.warn("[QQ] 图片 401，换 token 后重试");
+            synchronized (this) {
+                expiresAt = Instant.EPOCH;
+            }
+            resp = post(url, accessToken(), body);
+        }
+        if (resp.statusCode() != 200) {
+            log.warn("[QQ] 图片发送失败 HTTP {}：{}", resp.statusCode(), snippet(resp.body()));
             return false;
         }
         return true;

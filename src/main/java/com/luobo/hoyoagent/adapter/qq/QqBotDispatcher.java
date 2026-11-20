@@ -21,6 +21,7 @@ public class QqBotDispatcher {
     private final QqBotProperties props;
     private final QqBotApi api;
     private final AgentChatService chat;
+    private final QqMediaProbe probe;
 
     /** 一条消息一个虚拟线程：Agent 一轮 5~20 秒，不能堵住 WS 读循环。 */
     private final ExecutorService workers = Executors.newVirtualThreadPerTaskExecutor();
@@ -33,10 +34,11 @@ public class QqBotDispatcher {
         }
     };
 
-    public QqBotDispatcher(QqBotProperties props, QqBotApi api, AgentChatService chat) {
+    public QqBotDispatcher(QqBotProperties props, QqBotApi api, AgentChatService chat, QqMediaProbe probe) {
         this.props = props;
         this.api = api;
         this.chat = chat;
+        this.probe = probe;
     }
 
     public void onEvent(String type, JsonNode d) {
@@ -76,6 +78,11 @@ public class QqBotDispatcher {
 
         String sessionId = "qqbot:c2c:" + openid;
         log.info("[QQ] ← {} [{}] {}", QqBotProperties.mask(openid), sessionId, abbreviate(text));
+        // TEMP T0：图片通道探针，验证完删掉这三行
+        if ("/img".equals(text) || "/qr".equals(text)) {
+            probe.run(openid, msgId, "/qr".equals(text));
+            return;
+        }
 
         String reply;
         try {
