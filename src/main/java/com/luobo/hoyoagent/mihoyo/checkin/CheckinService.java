@@ -3,6 +3,8 @@ package com.luobo.hoyoagent.mihoyo.checkin;
 import com.luobo.hoyoagent.common.exception.BusinessException;
 import com.luobo.hoyoagent.common.exception.ErrorCode;
 import com.luobo.hoyoagent.mihoyo.checkin.dto.LunaInfo;
+import com.luobo.hoyoagent.mihoyo.credential.AccountService;
+import com.luobo.hoyoagent.mihoyo.credential.Credential;
 import com.luobo.hoyoagent.mihoyo.dto.GameRole;
 import com.luobo.hoyoagent.mihoyo.error.ErrorKind;
 import com.luobo.hoyoagent.mihoyo.error.MihoyoError;
@@ -36,20 +38,28 @@ public class CheckinService {
 
     private final GameRoleService roleService;
 
+    private final AccountService accounts;
+
     private final LunaClient luna;
 
     private final ObjectMapper mapper;
 
-    public CheckinService(GameRoleService roleService, LunaClient luna, ObjectMapper mapper) {
+    public CheckinService(GameRoleService roleService, LunaClient luna, ObjectMapper mapper, AccountService accounts) {
         this.roleService = roleService;
         this.luna = luna;
         this.mapper = mapper;
+        this.accounts = accounts;
     }
 
+    /** 临时桥：M1-c 之后由工具直接传凭据，这个无参版本就可以删了。 */
     public Summary checkinAll() {
+        return checkinAll(accounts.require(accounts.localUserId()));
+    }
+
+    public Summary checkinAll(Credential credential) {
         List<GameRole> roles;
         try {
-            roles = roleService.roles();
+            roles = roleService.roles(credential);
         } catch (BusinessException e) {
             return new Summary(List.of(), "读取绑定角色失败：" + e.getMessage(), kindOf(e));
         }
@@ -65,7 +75,7 @@ public class CheckinService {
         for (int i = 0; i < supported.size(); i++) {
             GameRole role = supported.get(i);
             CheckinGame game = CheckinGame.of(role.gameBiz()).orElseThrow();
-            results.add(checkinOne(game, role));
+            results.add(checkinOne(credential, game, role));
             if (i < supported.size() - 1) {
                 pause();
             }
@@ -73,8 +83,8 @@ public class CheckinService {
         return new Summary(results, summarize(results));
     }
 
-    private RoleResult checkinOne(CheckinGame game, GameRole role) {
-        MihoyoResult result = luna.info(game, role.region(), role.gameUid());
+    private RoleResult checkinOne(Credential credential, CheckinGame game, GameRole role) {
+        MihoyoResult result = luna.info(credential, game, role.region(), role.gameUid());
         if (!result.ok()) {
             return fail(game, role, result.error(), 0);
         }
@@ -88,10 +98,10 @@ public class CheckinService {
         int days = info.totalSignDay();
         if (info.isSign()) {
             return new RoleResult(game.gameBiz(), game.displayName(), role.gameUid(), role.region(),
-                    "ALREADY", "今天已经签过了", days, reward(game, days), null);
+                    "ALREADY", "今天已经签过了", days, reward(credential, game, days), null);
         }
 
-        MihoyoResult sign = luna.sign(game, role.region(), role.gameUid());
+        MihoyoResult sign = luna.sign(credential, game, role.region(), role.gameUid());
         if (sign.retcode() != 0) {
             return fail(game, role, sign.error(), days);
         }
@@ -102,7 +112,7 @@ public class CheckinService {
         }
 
         // 复验：sign 返回 0 不等于真的签上了
-        MihoyoResult after = luna.info(game, role.region(), role.gameUid());
+        MihoyoResult after = luna.info(credential, game, role.region(), role.gameUid());
         if (!after.ok() || !after.data().path("is_sign").asBoolean(false)) {
             return new RoleResult(game.gameBiz(), game.displayName(), role.gameUid(), role.region(),
                     "FAILED", "签到请求返回成功，但复验未通过", days, "", ErrorKind.UNKNOWN);
@@ -111,13 +121,13 @@ public class CheckinService {
         int afterDays = after.data().path("total_sign_day").asInt(days);
         log.info("签到成功: {} uid={} 累计 {} 天", game.displayName(), role.gameUid(), afterDays);
         return new RoleResult(game.gameBiz(), game.displayName(), role.gameUid(), role.region(),
-                "SIGNED", "签到成功", afterDays, reward(game, afterDays), null);
+                "SIGNED", "签到成功", afterDays, reward(credential, game, afterDays), null);
     }
 
     /** 奖励名（「原石」x60 这种）；拿不到就返回空串，不影响签到结论。 */
-    private String reward(CheckinGame game, int days) {
+    private String reward(Credential credential, CheckinGame game, int days) {
         try {
-            MihoyoResult home = luna.home(game);
+            MihoyoResult home = luna.home(credential, game);
             if (!home.ok()) {
                 return "";
             }

@@ -3,6 +3,7 @@ package com.luobo.hoyoagent.mihoyo.auth;
 import com.luobo.hoyoagent.common.exception.BusinessException;
 import com.luobo.hoyoagent.common.exception.ErrorCode;
 import com.luobo.hoyoagent.mihoyo.auth.passport.PassportClient;
+import com.luobo.hoyoagent.mihoyo.credential.AccountService;
 import com.luobo.hoyoagent.mihoyo.credential.CookieJar;
 import com.luobo.hoyoagent.mihoyo.credential.Credential;
 import com.luobo.hoyoagent.mihoyo.credential.CredentialProvider;
@@ -42,9 +43,12 @@ public class QrLoginService {
 
     private final Map<String, Session> sessions = new ConcurrentHashMap<>();
 
-    public QrLoginService(PassportClient passport, CredentialProvider credentials) {
+    private final AccountService accounts;
+
+    public QrLoginService(PassportClient passport, CredentialProvider credentials, AccountService accounts) {
         this.passport = passport;
         this.credentials = credentials;
+        this.accounts = accounts;
     }
 
     public Start start() {
@@ -109,7 +113,9 @@ public class QrLoginService {
         }
         CookieJar v2 = passport.exchangeV2(current.stoken(), current.mid());
         CookieJar merged = current.cookies().merge(v2);
-        credentials.update(current.withCookies(merged));
+        Credential refreshed  = current.withCookies(merged);
+        credentials.update(refreshed);
+        accounts.save(accounts.localUserId(), refreshed); // 同上
         return new RefreshResult(merged.has("ltoken_v2"), merged.has("cookie_token_v2"),
                 merged.has("ltoken_v2") ? "v2 凭据已刷新" : "刷新成功，但响应里没有 ltoken_v2");
     }
@@ -151,7 +157,9 @@ public class QrLoginService {
                 .with("ltoken", ltoken.token()).with("ltuid", aid)
                 .with("cookie_token", cookieToken.token()).with("account_id", aid)
                 .merge(v2);
-        credentials.update(new Credential(jar, aid, mid, stoken));
+        Credential fresh = new Credential(jar, aid, mid, stoken);
+        credentials.update(fresh);
+        accounts.save(accounts.localUserId(), fresh);     // 临时双写：M2 会只剩这一行
 
         session.uid = aid;
         session.mid = mid;

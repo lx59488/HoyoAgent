@@ -1,10 +1,13 @@
 package com.luobo.hoyoagent.agent.tool;
 
 import com.luobo.hoyoagent.agent.observability.ToolCallRecorder;
+import com.luobo.hoyoagent.channel.SessionRegistry;
 import com.luobo.hoyoagent.common.exception.BusinessException;
 import com.luobo.hoyoagent.mihoyo.checkin.CheckinOverview;
 import com.luobo.hoyoagent.mihoyo.checkin.CheckinOverviewService;
+import com.luobo.hoyoagent.mihoyo.credential.AccountService;
 import dev.langchain4j.agent.tool.Tool;
+import dev.langchain4j.agent.tool.ToolMemoryId;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
@@ -17,10 +20,18 @@ public class CheckinOverviewTool {
     private final ToolCallRecorder recorder;
 
     private final CheckinOverviewService service;
+    private final SessionRegistry sessions;
 
-    public CheckinOverviewTool(ToolCallRecorder recorder, CheckinOverviewService service) {
+    private final AccountService accounts;
+
+    public CheckinOverviewTool(ToolCallRecorder recorder,
+                               CheckinOverviewService service,
+                               SessionRegistry sessions,
+                               AccountService accounts) {
         this.recorder = recorder;
         this.service = service;
+        this.sessions = sessions;
+        this.accounts = accounts;
     }
 
     @Tool("""
@@ -29,11 +40,13 @@ public class CheckinOverviewTool {
             用户问「这个月漏了几天」「今天签到什么情况」「最近签到正常吗」时调用。
             用户要求「帮我签到」「帮我领原石」时不要用本工具，改用 checkinToday。
             """)
-    public String getCheckinOverview() {
-        log.info("[TOOL] getCheckinOverview");
+    public String getCheckinOverview(@ToolMemoryId String memoryId) {
+        String userId = sessions.userIdOrLocal(memoryId);
+        log.info("[TOOL] getCheckinOverview user={}", SessionRegistry.mask(userId));
         recorder.record("getCheckinOverview", "");
         try {
-            return format(service.overview());
+            // 用 find 而不是 require：未绑定时要回"友好总览"，不是抛异常
+            return format(service.overview(userId, accounts.find(userId).orElse(null)));
         } catch (BusinessException e) {
             return "【结论】查询签到总览失败：" + e.getMessage();
         }

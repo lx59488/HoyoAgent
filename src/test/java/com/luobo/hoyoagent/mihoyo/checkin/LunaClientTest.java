@@ -1,5 +1,7 @@
 package com.luobo.hoyoagent.mihoyo.checkin;
 
+import com.luobo.hoyoagent.mihoyo.credential.AccountService;
+import com.luobo.hoyoagent.mihoyo.credential.Credential;
 import com.luobo.hoyoagent.mihoyo.dto.GameRole;
 import com.luobo.hoyoagent.mihoyo.role.GameRoleService;
 import com.luobo.hoyoagent.mihoyo.transport.MihoyoResult;
@@ -26,9 +28,16 @@ class LunaClientTest {
     @Autowired
     GameRoleService roleService;
 
+    @Autowired
+    AccountService accounts;
+
+    private Credential credential() {
+        return accounts.require(accounts.localUserId());
+    }
+
     @Test
     void rolesAreDiscoverable() {
-        var roles = roleService.roles();
+        var roles = roleService.roles(credential());
 
         assertThat(roles).isNotEmpty();
         assertThat(roles).allSatisfy(r -> {
@@ -40,9 +49,8 @@ class LunaClientTest {
 
     @Test
     void lunaInfoAcceptsCurrentCredential() {
-        GameRole genshin = roleService.firstOf(CheckinGame.GENSHIN.gameBiz()).orElseThrow();
-
-        MihoyoResult info = luna.info(CheckinGame.GENSHIN, genshin.region(), genshin.gameUid());
+        GameRole genshin = roleService.firstOf(credential(), CheckinGame.GENSHIN.gameBiz()).orElseThrow();
+        MihoyoResult info = luna.info(credential(), CheckinGame.GENSHIN, genshin.region(), genshin.gameUid());
 
         assertThat(info.retcode()).isZero();
         assertThat(info.data().path("total_sign_day").asInt(0)).isGreaterThanOrEqualTo(0);

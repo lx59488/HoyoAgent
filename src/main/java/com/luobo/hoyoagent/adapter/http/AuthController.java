@@ -83,7 +83,7 @@ public class AuthController {
     /** 当前凭据下绑定的游戏角色（调试用；不含凭据）。 */
     @GetMapping("/roles")
     public Result<List<GameRole>> roles() {
-        return Result.success(roleService.roles());
+        return Result.success(roleService.roles(credentials.get()));
     }
 
     /** 静默刷新 v2 凭据（用已有 stoken 冒充手机，不需要扫码）。 */

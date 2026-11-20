@@ -1,9 +1,12 @@
 package com.luobo.hoyoagent.agent.tool;
 
 import com.luobo.hoyoagent.agent.observability.ToolCallRecorder;
+import com.luobo.hoyoagent.channel.SessionRegistry;
 import com.luobo.hoyoagent.common.exception.BusinessException;
 import com.luobo.hoyoagent.mihoyo.checkin.CheckinService;
+import com.luobo.hoyoagent.mihoyo.credential.AccountService;
 import dev.langchain4j.agent.tool.Tool;
+import dev.langchain4j.agent.tool.ToolMemoryId;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
@@ -25,17 +28,27 @@ public class CheckinTool {
 
     private final CheckinService checkinService;
 
-    public CheckinTool(ToolCallRecorder recorder, CheckinService checkinService) {
+    private final SessionRegistry sessions;
+
+    private final AccountService accounts;
+
+    public CheckinTool(ToolCallRecorder recorder,
+                       CheckinService checkinService,
+                       SessionRegistry sessions,
+                       AccountService accounts) {
         this.recorder = recorder;
         this.checkinService = checkinService;
+        this.sessions = sessions;
+        this.accounts = accounts;
     }
 
     @Tool("帮当前绑定账号完成米游社每日签到（原神/星穹铁道/绝区零）。"
             + "用户说「签到」「帮我领原石」「签一下」时调用；幂等，今天已签会如实返回「已经签过」。"
             + "只是问「签到了吗 / 漏了几天」时不要调用本工具，改用 getCheckinOverview。"
             + "只能签当前账号，不接受指定其他玩家")
-    public String checkinToday() {
-        log.info("[TOOL] checkinToday");
+    public String checkinToday(@ToolMemoryId String memoryId) {
+        String userId = sessions.userIdOrLocal(memoryId);
+        log.info("[TOOL] checkinToday user={}", SessionRegistry.mask(userId));
         recorder.record("checkinToday", "");
 
         CheckinService.Summary summary;

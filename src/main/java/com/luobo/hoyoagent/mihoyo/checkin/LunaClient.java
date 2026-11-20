@@ -25,16 +25,14 @@ public class LunaClient {
 
     private final ObjectMapper mapper;
 
-    private final CredentialProvider credentials;
 
-    public LunaClient(MihoyoHttp http, ObjectMapper mapper, CredentialProvider credentials) {
+    public LunaClient(MihoyoHttp http, ObjectMapper mapper) {
         this.mapper = mapper;
-        this.credentials = credentials;
         this.http = http;
     }
 
-    public MihoyoResult info(CheckinGame game, String region, String uid) {
-        return call(game, "/info", Map.of(
+    public MihoyoResult info(Credential credential, CheckinGame game, String region, String uid) {
+        return call(credential, game, "/info", Map.of(
                 "lang", "zh-cn",
                 "act_id", game.actId(),
                 "region", region,
@@ -42,35 +40,32 @@ public class LunaClient {
     }
 
 
-    public MihoyoResult sign(CheckinGame game, String region, String uid) {
+    public MihoyoResult sign(Credential credential, CheckinGame game, String region, String uid) {
         String body = mapper.writeValueAsString(Map.of(
                 "act_id", game.actId(), "region", region, "uid", uid));
-        return call(game, "/sign", Map.of(), body, game.signGame());
+        return call(credential, game, "/sign", Map.of(), body, game.signGame());
     }
 
-    public MihoyoResult home(CheckinGame game) {
-        return call(game, "/home", Map.of(
+    public MihoyoResult home(Credential credential, CheckinGame game) {
+        return call(credential, game, "/home", Map.of(
                 "lang", "zh-cn",
                 "act_id", game.actId()
         ), null, game.signGame());
     }
 
-    private MihoyoResult call(CheckinGame game, String action,
+    private MihoyoResult call(Credential credential, CheckinGame game, String action,
                               Map<String, String> query, String body, String signGame) {
-        Credential credential = credentials.get();
-        if (credential == null || credential.cookieHeader().isBlank()) {
+        if (credential == null || credential.cookieHeader() == null || credential.cookieHeader().isBlank()) {
             throw new BusinessException(ErrorCode.MOYO_AUTH_EXPIRED);
         }
         String cookie = credential.cookieHeader();
-        // 签到场景：device_id = md5(完整 cookie)，没有 fp
         Map<String, String> headers = Profiles.CHECKIN.headers(cookie, DsSigner.md5(cookie), null, body, "");
         if (signGame != null) {
-            headers.put("x-rpc-signgame", signGame);   // 每游戏不同，所以不放进 profile
+            headers.put("x-rpc-signgame", signGame);
         }
         MihoyoRequest request = body == null
                 ? MihoyoRequest.get(game.url(action), query, headers)
                 : MihoyoRequest.post(game.url(action), body, headers);
         return http.send(request);
-
     }
 }

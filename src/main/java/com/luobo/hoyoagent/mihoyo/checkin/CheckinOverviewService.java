@@ -2,6 +2,8 @@ package com.luobo.hoyoagent.mihoyo.checkin;
 
 import com.luobo.hoyoagent.common.exception.BusinessException;
 import com.luobo.hoyoagent.mihoyo.checkin.dto.LunaInfo;
+import com.luobo.hoyoagent.mihoyo.credential.AccountService;
+import com.luobo.hoyoagent.mihoyo.credential.Credential;
 import com.luobo.hoyoagent.mihoyo.credential.CredentialProvider;
 import com.luobo.hoyoagent.mihoyo.dto.GameRole;
 import com.luobo.hoyoagent.mihoyo.role.GameRoleService;
@@ -30,7 +32,7 @@ public class CheckinOverviewService {
 
     private final CheckinRecordStore records;
 
-    private final CredentialProvider credentials;
+    private final AccountService accounts;
 
     private final ObjectMapper mapper;
 
@@ -39,33 +41,39 @@ public class CheckinOverviewService {
     public CheckinOverviewService(GameRoleService roleService,
                                   LunaClient luna,
                                   CheckinRecordStore records,
-                                  CredentialProvider credentials,
+                                  AccountService accounts,
                                   ObjectMapper mapper,
                                   @Value("${hoyo.checkin.zone:Asia/Shanghai}") String zone) {
         this.roleService = roleService;
         this.luna = luna;
         this.records = records;
-        this.credentials = credentials;
+        this.accounts = accounts;
         this.mapper = mapper;
         this.zone = ZoneId.of(zone);
     }
 
-
+    /** 临时桥：M1-c 之后由工具直接传 userId + 凭据。 */
     public CheckinOverview overview() {
+        String userId = accounts.localUserId();
+        return overview(userId, accounts.find(userId).orElse(null));
+    }
+
+
+    public CheckinOverview overview(String userId, Credential credential) {
         LocalDate today = LocalDate.now(zone);
         String todayText = today.toString();
 
-        if (!credentials.isPresent()) {
-            return new CheckinOverview("未绑定米游社账号：先扫码登录或填 HOYO_COOKIE",
-                    List.of(), recent(), todayText);
+        if (credential == null || credential.cookieHeader() == null || credential.cookieHeader().isBlank()) {
+            return new CheckinOverview("还没绑定米游社账号，回复「绑定」获取二维码",
+                    List.of(), recent(userId), todayText);
         }
 
         List<GameRole> roles;
         try {
-            roles = roleService.roles();
+            roles = roleService.roles(credential);
         } catch (BusinessException e) {
             return new CheckinOverview("读取绑定角色失败：" + e.getMessage(),
-                    List.of(), recent(), todayText);
+                    List.of(), recent(userId), todayText);
         }
 
         List<GameRole> supported = roles.stream()
@@ -73,28 +81,28 @@ public class CheckinOverviewService {
                 .toList();
         if (supported.isEmpty()) {
             return new CheckinOverview("当前账号没有可签到的角色（原神/星铁/绝区零）",
-                    List.of(), recent(), todayText);
+                    List.of(), recent(userId), todayText);
         }
 
         List<CheckinOverview.Game> games = new ArrayList<>();
         for (int i = 0; i < supported.size(); i++) {
-            games.add(readOne(supported.get(i), today));
+            games.add(readOne(credential, supported.get(i), today));
             if (i < supported.size() - 1) {
                 pause();
             }
         }
-        return new CheckinOverview(summarize(games), games, recent(), todayText);
+        return new CheckinOverview(summarize(games), games, recent(userId), todayText);
     }
 
     /** 一个游戏失败不能拖垮整张总览：失败就写进那一行，其余照常返回。 */
-    private CheckinOverview.Game readOne(GameRole role, LocalDate today) {
+    private CheckinOverview.Game readOne(Credential credential, GameRole role, LocalDate today) {
         CheckinGame game = CheckinGame.of(role.gameBiz()).orElseThrow();
         String gameName = game.displayName();
         String uid = role.gameUid();
 
         MihoyoResult result;
         try {
-            result = luna.info(game, role.region(), uid);
+            result = luna.info(credential, game, role.region(), uid);
         } catch (RuntimeException e) {
             // MihoyoHttp 对 HTTP/IO 错误抛的是 BusinessException
             return new CheckinOverview.Game(role.gameBiz(), gameName, uid,
@@ -150,8 +158,7 @@ public class CheckinOverviewService {
     }
 
     /** 本地记录只用于"最近 7 天"；按 userId 过滤，别把别人的记录当成自己的。 */
-    private List<CheckinOverview.Recent> recent() {
-        String userId = credentials.userId();
+    private List<CheckinOverview.Recent> recent(String userId) {
         return records.recent(7).stream()
                 .filter(r -> userId.equals(r.userId()))
                 .map(r -> new CheckinOverview.Recent(

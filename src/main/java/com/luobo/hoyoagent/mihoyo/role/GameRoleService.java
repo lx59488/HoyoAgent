@@ -1,5 +1,6 @@
 package com.luobo.hoyoagent.mihoyo.role;
 
+import com.luobo.hoyoagent.mihoyo.credential.Credential;
 import com.luobo.hoyoagent.mihoyo.dto.GameRole;
 import com.luobo.hoyoagent.mihoyo.record.RecordClient;
 import org.slf4j.Logger;
@@ -9,7 +10,9 @@ import org.springframework.stereotype.Service;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * 当前账号绑定的角色列表，带 10 分钟缓存。
@@ -27,32 +30,35 @@ public class GameRoleService {
 
     private final RecordClient recordClient;
 
-    private volatile List<GameRole> cached = List.of();
-
-    private volatile Instant loadedAt = Instant.EPOCH;
+    /** key = 米游社 uid：换绑后 uid 变了，天然是一份新缓存，不会读到上一个号的角色。 */
+    private final Map<String, Cached> cache = new ConcurrentHashMap<>();
 
     public GameRoleService(RecordClient recordClient) {
         this.recordClient = recordClient;
     }
 
-    public List<GameRole> roles() {
-        if (Instant.now().isBefore(loadedAt.plus(TTL))) {
-            return cached;
+    public List<GameRole> roles(Credential credential) {
+        String key = credential.uid();
+        if (key == null || key.isBlank()) {
+            return recordClient.roles(credential);      // 没 uid 就没法当 key，直连
         }
-        List<GameRole> fresh = recordClient.roles();
-        cached = List.copyOf(fresh);
-        loadedAt = Instant.now();
-        log.info("已加载绑定角色 {} 个: {}", cached.size(),
-                cached.stream().map(r -> r.gameBiz() + "/" + r.gameUid()).toList());
-        return cached;
+        Cached cached = cache.get(key);
+        if (cached != null && Instant.now().isBefore(cached.loadedAt().plus(TTL))) {
+            return cached.roles();
+        }
+        List<GameRole> fresh = List.copyOf(recordClient.roles(credential));
+        cache.put(key, new Cached(fresh, Instant.now()));
+        log.info("已加载绑定角色 {} 个（uid={}）: {}", fresh.size(), key,
+                fresh.stream().map(r -> r.gameBiz() + "/" + r.gameUid()).toList());
+        return fresh;
     }
 
     /** 某个游戏下的第一个角色（原神/星铁一般只有一条）。 */
-    public Optional<GameRole> firstOf(String gameBiz) {
-        return roles().stream().filter(r -> r.gameBiz().equals(gameBiz)).findFirst();
+    public Optional<GameRole> firstOf(Credential credential, String gameBiz) {
+        return roles(credential).stream().filter(r -> r.gameBiz().equals(gameBiz)).findFirst();
     }
 
-    public void invalidate() {
-        loadedAt = Instant.EPOCH;
+
+    private record Cached(List<GameRole> roles, Instant loadedAt) {
     }
 }

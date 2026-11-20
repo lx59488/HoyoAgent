@@ -3,6 +3,7 @@ package com.luobo.hoyoagent.mihoyo.record;
 import com.luobo.hoyoagent.common.exception.BusinessException;
 import com.luobo.hoyoagent.common.exception.ErrorCode;
 import com.luobo.hoyoagent.mihoyo.MihoyoEndpoints;
+import com.luobo.hoyoagent.mihoyo.credential.Credential;
 import com.luobo.hoyoagent.mihoyo.credential.CredentialProvider;
 import com.luobo.hoyoagent.mihoyo.client.DeviceIdProvider;
 import com.luobo.hoyoagent.mihoyo.dto.GameRole;
@@ -34,25 +35,21 @@ public class RecordClient {
 
     private final MihoyoEndpoints endpoints;
 
-    private final CredentialProvider credentials;
-
     private final DeviceIdProvider deviceId;
 
     public RecordClient(MihoyoHttp http,
                         MihoyoEndpoints endpoints,
-                        CredentialProvider credentials,
                         DeviceIdProvider deviceId) {
         this.http = http;
         this.endpoints = endpoints;
-        this.credentials = credentials;
         this.deviceId = deviceId;
     }
 
-    /** 当前 cookie 绑定的游戏角色（不需要 DS，但需要 cookie）。 */
-    public List<GameRole> roles() {
+    /** 该 cookie 绑定的游戏角色（不需要 DS，但需要 cookie）。 */
+    public List<GameRole> roles(Credential credential) {
         MihoyoResult result = http.send(MihoyoRequest.get(
                 endpoints.baseUrl(MiyousheHost.TAKUMI) + "/binding/api/getUserGameRolesByCookie",
-                Map.of(), headers(true)));
+                Map.of(), headers(credential)));
         ensureOk(result, "读取绑定角色");
 
         return result.data().path("list").valueStream()
@@ -69,17 +66,17 @@ public class RecordClient {
     public JsonNode getAppConfig(int gids) {
         MihoyoResult result = http.send(MihoyoRequest.get(
                 endpoints.baseUrl(MiyousheHost.BBS) + "/apihub/wapi/getAppConfig",
-                Map.of("gids", String.valueOf(gids)), headers(false)));
+                Map.of("gids", String.valueOf(gids)),
+                Profiles.RECORD.headers(null, deviceId.get(), null, null, "")));
         ensureOk(result, "读取 App 配置");
         return result.data();
     }
 
-    private Map<String, String> headers(boolean auth) {
-        if (auth && !credentials.isPresent()) {
+    private Map<String, String> headers(Credential credential) {
+        if (credential == null || credential.cookieHeader() == null || credential.cookieHeader().isBlank()) {
             throw new BusinessException(ErrorCode.MOYO_AUTH_EXPIRED);
         }
-        String cookie = auth ? credentials.get().cookieHeader() : null;
-        return Profiles.RECORD.headers(cookie, deviceId.get(), null, null, "");
+        return Profiles.RECORD.headers(credential.cookieHeader(), deviceId.get(), null, null, "");
     }
 
     private static void ensureOk(MihoyoResult result, String action) {

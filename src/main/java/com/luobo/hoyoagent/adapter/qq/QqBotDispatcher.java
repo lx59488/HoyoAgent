@@ -1,6 +1,7 @@
 package com.luobo.hoyoagent.adapter.qq;
 
 import com.luobo.hoyoagent.agent.AgentChatService;
+import com.luobo.hoyoagent.channel.SessionRegistry;
 import com.luobo.hoyoagent.channel.TextChunker;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -21,7 +22,7 @@ public class QqBotDispatcher {
     private final QqBotProperties props;
     private final QqBotApi api;
     private final AgentChatService chat;
-    private final QqMediaProbe probe;
+    private final SessionRegistry sessions;
 
     /** 一条消息一个虚拟线程：Agent 一轮 5~20 秒，不能堵住 WS 读循环。 */
     private final ExecutorService workers = Executors.newVirtualThreadPerTaskExecutor();
@@ -34,11 +35,11 @@ public class QqBotDispatcher {
         }
     };
 
-    public QqBotDispatcher(QqBotProperties props, QqBotApi api, AgentChatService chat, QqMediaProbe probe) {
+    public QqBotDispatcher(QqBotProperties props, QqBotApi api, AgentChatService chat, SessionRegistry sessions) {
         this.props = props;
         this.api = api;
         this.chat = chat;
-        this.probe = probe;
+        this.sessions = sessions;
     }
 
     public void onEvent(String type, JsonNode d) {
@@ -76,13 +77,10 @@ public class QqBotDispatcher {
             return;
         }
 
+        String userId = "qq:" + openid;
         String sessionId = "qqbot:c2c:" + openid;
+        sessions.register(sessionId, userId);      // 每条消息都注册：重启后第一条就恢复映射
         log.info("[QQ] ← {} [{}] {}", QqBotProperties.mask(openid), sessionId, abbreviate(text));
-        // TEMP T0：图片通道探针，验证完删掉这三行
-        if ("/img".equals(text) || "/qr".equals(text)) {
-            probe.run(openid, msgId, "/qr".equals(text));
-            return;
-        }
 
         String reply;
         try {
