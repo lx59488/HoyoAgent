@@ -61,6 +61,14 @@ const QR_CLASS = {
     FAILED: "pill-err"
 };
 
+/** 后端 /api/auth/status 的 source 是 AccountService.Source 枚举（2026-11-20 起）。 */
+const SOURCE_LABEL = {
+    ACCOUNT: "账号文件",
+    LEGACY: "旧 credential.properties",
+    ENV: ".env 的 HOYO_COOKIE",
+    NONE: "无"
+};
+
 const $ = (selector) => document.querySelector(selector);
 
 /* ------------------------------------------------------------------ */
@@ -147,7 +155,7 @@ function renderAccount(status) {
     const dl = document.createElement("dl");
     const rows = [
         ["userId", status.userId || "—"],
-        ["来源", status.source || "—"],
+        ["来源", SOURCE_LABEL[status.source] || status.source || "—"],
         ["uid", status.uid || "—"],
         ["mid", status.mid || "—"]
     ];

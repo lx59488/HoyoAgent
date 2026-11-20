@@ -1,5 +1,7 @@
 package com.luobo.hoyoagent.mihoyo.binding;
 
+import com.luobo.hoyoagent.common.log.Mask;
+
 import com.luobo.hoyoagent.common.exception.BusinessException;
 import com.luobo.hoyoagent.common.exception.ErrorCode;
 import com.luobo.hoyoagent.mihoyo.auth.QrImage;
@@ -61,7 +63,6 @@ public class BindingService {
 
     private final CheckinRecordStore records;
 
-
     public BindingService(QrLoginService qrLogin, AccountService accounts, CheckinRecordStore records) {
         this.qrLogin = qrLogin;
         this.accounts = accounts;
@@ -93,7 +94,7 @@ public class BindingService {
         }
         QrLoginService.Start start = qrLogin.start(userId);
         lastStart.put(userId, Instant.now());
-        log.info("已为 user={} 建码，ticket={}", mask(userId), shortTicket(start.ticket()));
+        log.info("已为 user={} 建码，ticket={}", Mask.id(userId), Mask.prefix(start.ticket(), 8));
         return new QrTicket(start.ticket(), QrImage.png(start.url()), start.expiresInSeconds());
     }
 
@@ -114,20 +115,9 @@ public class BindingService {
     public boolean unbind(String userId) {
         boolean removed = accounts.delete(userId);
         int cleared = records.deleteAll(userId);
-        log.info("解绑 user={} 凭据={} 签到记录={} 条", mask(userId), removed, cleared);
+        log.info("解绑 user={} 凭据={} 签到记录={} 条", Mask.id(userId), removed, cleared);
         return removed;
     }
     public record QrTicket(String ticket, byte[] png, long expiresInSeconds) {
-    }
-
-    private static String shortTicket(String ticket) {
-        return ticket == null || ticket.length() < 8 ? "***" : ticket.substring(0, 8) + "…";
-    }
-
-    private static String mask(String userId) {
-        if (userId == null || userId.isBlank()) {
-            return "***";
-        }
-        return userId.length() <= 8 ? "***" : userId.substring(0, 4) + "***" + userId.substring(userId.length() - 4);
     }
 }

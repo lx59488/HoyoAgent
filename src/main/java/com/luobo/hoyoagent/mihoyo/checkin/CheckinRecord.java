@@ -23,7 +23,7 @@ public record CheckinRecord(String userId,
                             String startedAt,
                             String finishedAt,
                             String message,
-                            List<CheckinService.RoleResult> roles) {
+                            List<CheckinRoleResult> roles) {
 
     public CheckinRecord {
         roles = roles == null ? List.of() : List.copyOf(roles);

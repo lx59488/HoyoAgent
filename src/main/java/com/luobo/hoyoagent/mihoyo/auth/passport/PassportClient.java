@@ -5,7 +5,7 @@ import com.luobo.hoyoagent.common.exception.ErrorCode;
 import com.luobo.hoyoagent.mihoyo.MihoyoEndpoints;
 import com.luobo.hoyoagent.mihoyo.client.DeviceIdProvider;
 import com.luobo.hoyoagent.mihoyo.credential.CookieJar;
-import com.luobo.hoyoagent.mihoyo.enums.MiyousheHost;
+import com.luobo.hoyoagent.mihoyo.enums.MihoyoHost;
 import com.luobo.hoyoagent.mihoyo.transport.HeaderProfile;
 import com.luobo.hoyoagent.mihoyo.transport.MihoyoHttp;
 import com.luobo.hoyoagent.mihoyo.transport.MihoyoRequest;
@@ -171,14 +171,14 @@ public class PassportClient {
         Map<String, String> headers = profile.headers(
                 cookie, device.deviceId(), device.deviceFingerprint(), body, "");
         return http.send(MihoyoRequest.post(
-                endpoints.baseUrl(MiyousheHost.PASSPORT) + path, body, headers));
+                endpoints.baseUrl(MihoyoHost.PASSPORT) + path, body, headers));
     }
 
     private MihoyoResult get(String path, String cookie) {
         Map<String, String> headers = Profiles.EXCHANGE.headers(
                 cookie, accountDevice.get(), null, "", "");
         return http.send(MihoyoRequest.get(
-                endpoints.baseUrl(MiyousheHost.PASSPORT) + path, Map.of(), headers));
+                endpoints.baseUrl(MihoyoHost.PASSPORT) + path, Map.of(), headers));
     }
 
     private static void requireOk(MihoyoResult result, String step) {

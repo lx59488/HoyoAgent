@@ -2,6 +2,7 @@ package com.luobo.hoyoagent.agent.tool;
 
 import com.luobo.hoyoagent.agent.observability.ToolCallRecorder;
 import com.luobo.hoyoagent.channel.SessionRegistry;
+import com.luobo.hoyoagent.mihoyo.checkin.CheckinRunResult;
 import com.luobo.hoyoagent.mihoyo.checkin.CheckinService;
 import com.luobo.hoyoagent.mihoyo.credential.AccountService;
 import com.luobo.hoyoagent.mihoyo.credential.Credential;
@@ -28,12 +29,12 @@ class CheckinToolIdentityTest {
         sessions.register("qqbot:c2c:BBB", "qq:BBB");
 
         AccountService accounts = mock(AccountService.class);
-        when(accounts.require("qq:AAA")).thenReturn(A);
-        when(accounts.require("qq:BBB")).thenReturn(B);
+        when(accounts.requireCredential("qq:AAA")).thenReturn(A);
+        when(accounts.requireCredential("qq:BBB")).thenReturn(B);
 
         CheckinService checkin = mock(CheckinService.class);
-        when(checkin.checkinAll(A)).thenReturn(new CheckinService.Summary(List.of(), "A 的结果"));
-        when(checkin.checkinAll(B)).thenReturn(new CheckinService.Summary(List.of(), "B 的结果"));
+        when(checkin.checkinAll(A)).thenReturn(new CheckinRunResult(List.of(), "A 的结果"));
+        when(checkin.checkinAll(B)).thenReturn(new CheckinRunResult(List.of(), "B 的结果"));
 
         CheckinTool tool = new CheckinTool(new ToolCallRecorder(), checkin, sessions, accounts);
 
@@ -42,21 +43,21 @@ class CheckinToolIdentityTest {
 
         verify(checkin).checkinAll(A);
         verify(checkin).checkinAll(B);
-        verify(accounts, never()).require("local");
+        verify(accounts, never()).requireCredential("local");
     }
 
     @Test
     void unknownSessionRunsAsLocal() {
         SessionRegistry sessions = new SessionRegistry("local");
         AccountService accounts = mock(AccountService.class);
-        when(accounts.require("local")).thenReturn(A);
+        when(accounts.requireCredential("local")).thenReturn(A);
 
         CheckinService checkin = mock(CheckinService.class);
-        when(checkin.checkinAll(A)).thenReturn(new CheckinService.Summary(List.of(), "ok"));
+        when(checkin.checkinAll(A)).thenReturn(new CheckinRunResult(List.of(), "ok"));
 
         CheckinTool tool = new CheckinTool(new ToolCallRecorder(), checkin, sessions, accounts);
         tool.checkinToday("web:whatever");
 
-        verify(accounts).require("local");
+        verify(accounts).requireCredential("local");
     }
 }

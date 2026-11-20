@@ -490,10 +490,9 @@ GET  {host}/event/luna/home?lang=zh-cn&act_id=..     ← 奖励名（可选，�
 | `mihoyo/auth/passport/PassportDevice.java` | 持久化 16 位 hex `device_id` + `device_fp`（`~/.hoyo/passport-device`） |
 | `mihoyo/auth/passport/PassportClient.java` | 建码 / 轮询 / 换 ltoken / 换 cookie_token / **v2 换取**；三套头（`QR_APP`/`QR_WEB`/`EXCHANGE`）都走 `MihoyoHttp`，Set-Cookie 从响应取、不存共享字段 |
 | `mihoyo/auth/QrLoginService.java` | 状态机 `WAITING→SCANNED→BOUND`，换票只做一次，3 分钟过期；`refreshV2()` 静默续期 |
-| `mihoyo/auth/CredentialStore.java` | 写 `~/.hoyo/credential.properties`（明文，owner-only） |
-| `mihoyo/auth/CredentialProvider.java` | 启动优先级：**带 stoken 的文件 > `.env`** |
+| `mihoyo/credential/AccountService.java` | 按 `userId` 解析凭据（唯一入口）；来源 `ACCOUNT/LEGACY/ENV/NONE` |
 | `mihoyo/dto/GameRole.java` + `mihoyo/role/GameRoleService.java` | 角色自动发现（10 分钟缓存），**替代写死的 `HOYO_ROLE_ID`** |
-| `mihoyo/checkin/MiyousheCheckinGame.java` | 各游戏 `act_id` / host / `signgame` |
+| `mihoyo/checkin/CheckinGame.java` | 各游戏 `act_id` / host / `signgame` |
 | `mihoyo/checkin/LunaClient.java` | `info` / `sign` / `home`，签到头 + DS1 |
 | `mihoyo/checkin/CheckinService.java` | `info → sign → info` 复验、`first_bind`、验证码、retcode 翻译 |
 | `agent/tool/CheckinTool.java` | Agent 工具：`checkinToday()`（无身份参数） |

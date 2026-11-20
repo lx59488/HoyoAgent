@@ -1,5 +1,7 @@
 package com.luobo.hoyoagent.mihoyo.checkin;
 
+import com.luobo.hoyoagent.common.log.Mask;
+
 import com.luobo.hoyoagent.agent.notify.Notifier;
 import com.luobo.hoyoagent.mihoyo.credential.Account;
 import com.luobo.hoyoagent.mihoyo.credential.AccountService;
@@ -163,7 +165,7 @@ public class CheckinScheduler {
                 log.info("[CHECKIN] 今天已签过（{}），跳过 {}", CheckinRecordStore.describe(today.get()), trigger);
                 return today.get();
             }
-            Credential credential = accounts.find(userId).orElse(null);
+            Credential credential = accounts.credentialOf(userId).orElse(null);
             return execute(userId, credential, date, trigger);
         } finally {
             lock.unlock();
@@ -197,7 +199,7 @@ public class CheckinScheduler {
             for (Account account : all) {
                 Optional<CheckinRecord> today = records.find(account.userId(), date);
                 if (trigger != CheckinRecord.Trigger.MANUAL && today.filter(CheckinRecord::done).isPresent()) {
-                    log.info("[CHECKIN] {} 今天已签过，跳过", mask(account.userId()));
+                    log.info("[CHECKIN] {} 今天已签过，跳过", Mask.id(account.userId()));
                     continue;
                 }
                 pending.add(account);
@@ -222,7 +224,7 @@ public class CheckinScheduler {
         List<Thread> threads = new ArrayList<>();
 
         for (Account account : pending) {
-            threads.add(Thread.ofVirtual().name("checkin-" + mask(account.userId())).start(() -> {
+            threads.add(Thread.ofVirtual().name("checkin-" + Mask.id(account.userId())).start(() -> {
                 try {
                     permits.acquire();
                     try {
@@ -236,7 +238,7 @@ public class CheckinScheduler {
                     Thread.currentThread().interrupt();
                 } catch (RuntimeException e) {
                     log.error("{} {} 签到异常: user={} err={}",
-                            ALERT, trigger, mask(account.userId()), e.toString());
+                            ALERT, trigger, Mask.id(account.userId()), e.toString());
                 }
             }));
         }
@@ -259,7 +261,7 @@ public class CheckinScheduler {
                     "未绑定米游社账号：先扫码登录或填 HOYO_COOKIE", List.of());
         }
 
-        CheckinService.Summary summary;
+        CheckinRunResult summary;
         try {
             summary = checkin.checkinAll(credential);
         } catch (RuntimeException e) {
@@ -280,7 +282,7 @@ public class CheckinScheduler {
                                  ErrorKind kind,
                                  Instant started,
                                  String message,
-                                 List<CheckinService.RoleResult> roles) {
+                                 List<CheckinRoleResult> roles) {
         CheckinRecord record = new CheckinRecord(
                 userId, date, trigger, outcome, kind,
                 started.atZone(zone).toOffsetDateTime().toString(),
@@ -289,11 +291,11 @@ public class CheckinScheduler {
         records.save(record);
 
         if (record.attention()) {
-            log.error("{} {} {} 未完成（{}）：{}（kind={}）", ALERT, mask(userId), trigger, outcome, message, kind);
+            log.error("{} {} {} 未完成（{}）：{}（kind={}）", ALERT, Mask.id(userId), trigger, outcome, message, kind);
         } else if (outcome == CheckinRecord.Outcome.SKIPPED) {
-            log.warn("[CHECKIN] {} 跳过签到：{}", mask(userId), message);
+            log.warn("[CHECKIN] {} 跳过签到：{}", Mask.id(userId), message);
         } else {
-            log.info("[CHECKIN] {} 完成 {}：{}", mask(userId), trigger, message);
+            log.info("[CHECKIN] {} 完成 {}：{}", Mask.id(userId), trigger, message);
         }
 
         notifyQuietly(record);
@@ -313,18 +315,18 @@ public class CheckinScheduler {
     }
 
     /** 全部角色都新签/本来签过才算 DONE；空结果（读不到角色）算失败。 */
-    static CheckinRecord.Outcome classify(List<CheckinService.RoleResult> results) {
+    static CheckinRecord.Outcome classify(List<CheckinRoleResult> results) {
         if (results == null || results.isEmpty()) {
             return CheckinRecord.Outcome.FAILED;
         }
-        long ok = results.stream().filter(CheckinService.RoleResult::ok).count();
+        long ok = results.stream().filter(CheckinRoleResult::ok).count();
         if (ok == results.size()) {
             return CheckinRecord.Outcome.DONE;
         }
         return ok == 0 ? CheckinRecord.Outcome.FAILED : CheckinRecord.Outcome.PARTIAL;
     }
 
-    static ErrorKind worstKind(List<CheckinService.RoleResult> results) {
+    static ErrorKind worstKind(List<CheckinRoleResult> results) {
         if (results == null || results.isEmpty()) {
             return null;
         }
@@ -400,7 +402,6 @@ public class CheckinScheduler {
         return records.find(userId, date);
     }
 
-
     private static void sleep(long millis) {
         try {
             Thread.sleep(millis);
@@ -408,14 +409,6 @@ public class CheckinScheduler {
             Thread.currentThread().interrupt();
         }
     }
-
-    private static String mask(String userId) {
-        if (userId == null || userId.isBlank()) {
-            return "***";
-        }
-        return userId.length() <= 8 ? "***" : userId.substring(0, 4) + "***" + userId.substring(userId.length() - 4);
-    }
-
 
     /**
      * 手动补跑：跑所有账号。返回本地那条是为了兼容 {@code POST /api/checkin/run} 的响应，

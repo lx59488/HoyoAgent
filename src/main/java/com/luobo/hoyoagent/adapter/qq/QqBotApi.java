@@ -80,7 +80,7 @@ public class QqBotApi {
      * @return HTTP 非 200 返回 {@code false}（只记日志）；网络异常仍会抛出，由调用方兜底。
      *         注意：这里发的是<b>被动回复</b>，不能当主动推送通道用（主动消息另有频控）。
      */
-    public boolean sendC2c(String openid, String content, String msgId, int seq) {
+    public boolean sendC2C(String openid, String content, String msgId, int seq) {
         Map<String, Object> payload = new LinkedHashMap<>();
         payload.put("content", content);
         payload.put("msg_type", 0);       // 0 = 纯文本
@@ -140,7 +140,7 @@ public class QqBotApi {
      *
      * <p>注意：{@code msg_type=7} 时 {@code content} 必须给个非空值（官方已知问题，填个空格）。
      */
-    public boolean sendC2cImage(String openid, byte[] png, String msgId, int seq) {
+    public boolean sendC2CImage(String openid, byte[] png, String msgId, int seq) {
         String fileName = "probe-" + System.currentTimeMillis() + ".png";
         String fileInfo = uploadImage(openid, png, fileName);
 

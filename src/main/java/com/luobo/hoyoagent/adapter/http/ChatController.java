@@ -1,7 +1,7 @@
 package com.luobo.hoyoagent.adapter.http;
 
 import com.luobo.hoyoagent.common.exception.ErrorCode;
-import com.luobo.hoyoagent.common.result.Result;
+import com.luobo.hoyoagent.common.result.ApiResult;
 import dev.langchain4j.model.chat.ChatModel;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestParam;
@@ -18,11 +18,11 @@ public class ChatController {
 
     /** 纯模型问答（对照组：不挂工具）。 */
     @GetMapping("/chat")
-    public Result<ChatReply> chat(@RequestParam("q") String q) {
+    public ApiResult<ChatReply> chat(@RequestParam("q") String q) {
         try {
-            return Result.success(new ChatReply(chatModel.chat(q)));
+            return ApiResult.success(new ChatReply(chatModel.chat(q)));
         } catch (Exception e) {
-            return Result.error(ErrorCode.AI_SERVICE_ERROR, e.getClass().getSimpleName() + ": " + e.getMessage());
+            return ApiResult.error(ErrorCode.AI_SERVICE_ERROR, e.getClass().getSimpleName() + ": " + e.getMessage());
         }
     }
 

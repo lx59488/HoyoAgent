@@ -1,5 +1,6 @@
 package com.luobo.hoyoagent.agent.memory;
 
+import com.luobo.hoyoagent.common.log.Mask;
 import dev.langchain4j.data.message.ChatMessage;
 import dev.langchain4j.store.memory.chat.ChatMemoryStore;
 import org.slf4j.Logger;
@@ -34,7 +35,7 @@ public class SessionMemoryStore implements ChatMemoryStore {
 
     private final Duration idleTtl;
 
-    private final MemoryPersistence persistence;
+    private final MemoryStore persistence;
 
     private final Map<Object, Slot> slots = new ConcurrentHashMap<>();
 
@@ -44,12 +45,11 @@ public class SessionMemoryStore implements ChatMemoryStore {
     }
 
     @Autowired
-    public SessionMemoryStore(MemoryProperties properties, MemoryPersistence persistence) {
+    public SessionMemoryStore(MemoryProperties properties, MemoryStore persistence) {
         this.maxSessions = properties.maxSessions();
         this.idleTtl = properties.idleTtl();
         this.persistence = persistence;
     }
-
 
     @Override
     public List<ChatMessage> getMessages(Object memoryId) {
@@ -63,7 +63,7 @@ public class SessionMemoryStore implements ChatMemoryStore {
         if (idleSince(slot.lastAccess())) {
             if (slots.remove(memoryId, slot)) {
                 log.info("[MEMORY] 会话空闲超时，丢弃 session={} messages={}",
-                        mask(memoryId), slot.size());
+                        Mask.id(String.valueOf(memoryId)), slot.size());
             }
             return List.of();
         }
@@ -101,18 +101,18 @@ public class SessionMemoryStore implements ChatMemoryStore {
         if (persistence == null) {
             return null;
         }
-        Optional<MemoryPersistence.Stored> stored = persistence.load(String.valueOf(memoryId));
+        Optional<MemoryStore.Stored> stored = persistence.load(String.valueOf(memoryId));
         if (stored.isEmpty() || stored.get().messages().isEmpty()) {
             return null;
         }
         Slot slot = new Slot();
         slot.replaceAt(stored.get().messages(), stored.get().updatedAt());
         if (idleSince(slot.lastAccess())) {
-            log.info("[MEMORY] 磁盘上的会话已空闲超时，当作新会话 session={}", mask(memoryId));
+            log.info("[MEMORY] 磁盘上的会话已空闲超时，当作新会话 session={}", Mask.id(String.valueOf(memoryId)));
             return null;
         }
         slots.put(memoryId, slot);
-        log.info("[MEMORY] 从磁盘恢复会话 session={} messages={}", mask(memoryId), slot.size());
+        log.info("[MEMORY] 从磁盘恢复会话 session={} messages={}", Mask.id(String.valueOf(memoryId)), slot.size());
         return slot;
     }
 
@@ -157,17 +157,9 @@ public class SessionMemoryStore implements ChatMemoryStore {
             }
             slots.remove(oldest.getKey(), oldest.getValue());
             log.info("[MEMORY] 会话数超过 {}，淘汰最久未用 session={}",
-                    maxSessions, mask(oldest.getKey()));
+                    maxSessions, Mask.id(String.valueOf(oldest.getKey())));
         }
     }
-
-    /** 日志里不出现完整会话 id：将来 onebot 接入后它可能含 QQ 号。 */
-    private static String mask(Object memoryId) {
-        String text = String.valueOf(memoryId);
-        return text.length() <= 6 ? "***" : text.substring(0, 6) + "***";
-    }
-
-
 
     /** 一条会话：消息不可变、替换而非追加修改。 */
     private static final class Slot {

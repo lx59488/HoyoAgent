@@ -66,7 +66,7 @@ class CheckinSchedulerTest {
         checkin = mock(CheckinService.class);
         store = new CheckinRecordStore(dir, JsonMapper.builder().build());
         accounts = mock(AccountService.class);
-        when(accounts.find("local")).thenReturn(Optional.of(LOCAL_CRED));
+        when(accounts.credentialOf("local")).thenReturn(Optional.of(LOCAL_CRED));
         when(accounts.all()).thenReturn(List.of(LOCAL_ACCOUNT));
         notifier = mock(Notifier.class);
         scheduler = new CheckinScheduler(checkin, store, accounts, notifier, "local", true, CRON,
@@ -75,7 +75,7 @@ class CheckinSchedulerTest {
 
     @Test
     void allSignedOrAlreadyIsDone() {
-        when(checkin.checkinAll(any())).thenReturn(new CheckinService.Summary(
+        when(checkin.checkinAll(any())).thenReturn(new CheckinRunResult(
                 List.of(role("SIGNED"), role("ALREADY")), "2 个角色：新签 1，已签 1"));
 
         CheckinRecord record = scheduler.run(CheckinRecord.Trigger.SCHEDULED);
@@ -91,10 +91,10 @@ class CheckinSchedulerTest {
 
     @Test
     void mixedResultIsPartialAndReportsTheMostBlockingKind() {
-        CheckinService.RoleResult authFailed = new CheckinService.RoleResult(
+        CheckinRoleResult authFailed = new CheckinRoleResult(
                 "hkrpg_cn", "崩坏：星穹铁道", "103871907", "prod_gf_cn",
                 "FAILED", "登录状态失效，请重新扫码绑定", 7, "", ErrorKind.AUTH);
-        when(checkin.checkinAll(any())).thenReturn(new CheckinService.Summary(
+        when(checkin.checkinAll(any())).thenReturn(new CheckinRunResult(
                 List.of(role("SIGNED"), authFailed), "2 个角色：新签 1，失败/需处理 1"));
 
         CheckinRecord record = scheduler.run(CheckinRecord.Trigger.SCHEDULED);
@@ -107,7 +107,7 @@ class CheckinSchedulerTest {
 
     @Test
     void roleLoadFailureIsFailedEvenWithNoResults() {
-        when(checkin.checkinAll(any())).thenReturn(new CheckinService.Summary(
+        when(checkin.checkinAll(any())).thenReturn(new CheckinRunResult(
                 List.of(), "读取绑定角色失败：登录状态失效，请重新扫码绑定", ErrorKind.AUTH));
 
         CheckinRecord record = scheduler.run(CheckinRecord.Trigger.SCHEDULED);
@@ -119,7 +119,7 @@ class CheckinSchedulerTest {
 
     @Test
     void noBoundAccountSkipsWithoutTouchingMihoyo() {
-        when(accounts.find("local")).thenReturn(Optional.empty());
+        when(accounts.credentialOf("local")).thenReturn(Optional.empty());
 
         CheckinRecord record = scheduler.run(CheckinRecord.Trigger.SCHEDULED);
 
@@ -143,7 +143,7 @@ class CheckinSchedulerTest {
     @Test
     void scheduledRunRetriesWhenTodayWasOnlyPartial() {
         saveToday(CheckinRecord.Outcome.PARTIAL);
-        when(checkin.checkinAll(any())).thenReturn(new CheckinService.Summary(
+        when(checkin.checkinAll(any())).thenReturn(new CheckinRunResult(
                 List.of(role("ALREADY")), "1 个角色：已签 1"));
 
         CheckinRecord record = scheduler.run(CheckinRecord.Trigger.SCHEDULED);
@@ -165,7 +165,7 @@ class CheckinSchedulerTest {
     @Test
     void manualForceRerunsEvenWhenDone() {
         saveToday(CheckinRecord.Outcome.DONE);
-        when(checkin.checkinAll(any())).thenReturn(new CheckinService.Summary(
+        when(checkin.checkinAll(any())).thenReturn(new CheckinRunResult(
                 List.of(role("ALREADY")), "1 个角色：已签 1"));
 
         CheckinRecord record = scheduler.runManual(true);
@@ -194,7 +194,7 @@ class CheckinSchedulerTest {
         assertThat(disabled.run(CheckinRecord.Trigger.SCHEDULED)).isNull();
         verify(checkin, never()).checkinAll(any());
 
-        when(checkin.checkinAll(any())).thenReturn(new CheckinService.Summary(
+        when(checkin.checkinAll(any())).thenReturn(new CheckinRunResult(
                 List.of(role("SIGNED")), "1 个角色：新签 1"));
         assertThat(disabled.run(CheckinRecord.Trigger.MANUAL).outcome())
                 .isEqualTo(CheckinRecord.Outcome.DONE);
@@ -206,7 +206,7 @@ class CheckinSchedulerTest {
         store.save(new CheckinRecord("someone-else", today(), CheckinRecord.Trigger.SCHEDULED,
                 CheckinRecord.Outcome.DONE, null, today() + "T00:10:00+08:00",
                 today() + "T00:10:05+08:00", "别人的记录", List.of()));
-        when(checkin.checkinAll(any())).thenReturn(new CheckinService.Summary(
+        when(checkin.checkinAll(any())).thenReturn(new CheckinRunResult(
                 List.of(role("SIGNED")), "1 个角色：新签 1"));
 
         CheckinRecord record = scheduler.run(CheckinRecord.Trigger.SCHEDULED);
@@ -265,7 +265,7 @@ class CheckinSchedulerTest {
 
     @Test
     void publishedNotificationCarriesTheOutcome() {
-        when(checkin.checkinAll(any())).thenReturn(new CheckinService.Summary(
+        when(checkin.checkinAll(any())).thenReturn(new CheckinRunResult(
                 List.of(role("SIGNED")), "1 个角色：新签 1"));
 
         scheduler.run(CheckinRecord.Trigger.SCHEDULED);
@@ -279,7 +279,7 @@ class CheckinSchedulerTest {
 
     @Test
     void failedCheckinIsPublishedAsError() {
-        when(checkin.checkinAll(any())).thenReturn(new CheckinService.Summary(
+        when(checkin.checkinAll(any())).thenReturn(new CheckinRunResult(
                 List.of(), "读取绑定角色失败：登录状态失效", ErrorKind.AUTH));
 
         scheduler.run(CheckinRecord.Trigger.SCHEDULED);
@@ -292,7 +292,7 @@ class CheckinSchedulerTest {
 
     @Test
     void notificationFailureDoesNotBreakTheCheckin() {
-        when(checkin.checkinAll(any())).thenReturn(new CheckinService.Summary(
+        when(checkin.checkinAll(any())).thenReturn(new CheckinRunResult(
                 List.of(role("SIGNED")), "1 个角色：新签 1"));
         doThrow(new IllegalStateException("webhook down")).when(notifier).send(any());
 
@@ -311,8 +311,8 @@ class CheckinSchedulerTest {
         return LocalDate.now(ZONE).toString();
     }
 
-    private static CheckinService.RoleResult role(String status) {
-        return new CheckinService.RoleResult("hk4e_cn", "原神", "100848866", "cn_gf01",
+    private static CheckinRoleResult role(String status) {
+        return new CheckinRoleResult("hk4e_cn", "原神", "100848866", "cn_gf01",
                 status, "今天已经签过了", 12, "", null);
     }
 }

@@ -39,22 +39,22 @@ class AccountServiceTest {
                 legacy("stoken=from-legacy; mid=m; stuid=2"), "local",
                 "stoken=from-env; mid=m; stuid=3");
 
-        assertThat(service.find("local").orElseThrow().stoken()).isEqualTo("from-store");
+        assertThat(service.credentialOf("local").orElseThrow().stoken()).isEqualTo("from-store");
     }
 
     @Test
     void legacyAndEnvOnlyApplyToLocalUser() throws IOException {
         AccountService service = new AccountService(store(), legacy("ltoken=legacy; ltuid=7"), "local", "");
 
-        assertThat(service.find("local").orElseThrow().uid()).isEqualTo("7");
-        assertThat(service.find("qq:E43830A902F2")).isEmpty();
+        assertThat(service.credentialOf("local").orElseThrow().uid()).isEqualTo("7");
+        assertThat(service.credentialOf("qq:E43830A902F2")).isEmpty();
     }
 
     @Test
     void requireThrowsWhenUnbound() {
         AccountService service = new AccountService(store(), none(), "local", "");
 
-        assertThatThrownBy(() -> service.require("qq:someone"))
+        assertThatThrownBy(() -> service.requireCredential("qq:someone"))
                 .isInstanceOf(BusinessException.class)
                 .hasMessageContaining("绑定");
     }
@@ -67,7 +67,7 @@ class AccountServiceTest {
         service.save("qq:someone", Credential.of("ltoken=a; ltuid=42"));
 
         assertThat(service.isBound("qq:someone")).isTrue();
-        assertThat(service.require("qq:someone").uid()).isEqualTo("42");
+        assertThat(service.requireCredential("qq:someone").uid()).isEqualTo("42");
         assertThat(service.findByUid("42")).isPresent();
     }
 
@@ -89,7 +89,7 @@ class AccountServiceTest {
         assertThatThrownBy(() -> service.claim("qq:B", Credential.of("ltoken=b; ltuid=42")))
                 .isInstanceOf(BusinessException.class)
                 .hasMessageContaining("其他用户");
-        assertThat(service.find("qq:B")).isEmpty();
+        assertThat(service.credentialOf("qq:B")).isEmpty();
     }
 
     @Test
@@ -99,6 +99,34 @@ class AccountServiceTest {
 
         service.claim("qq:A", Credential.of("stoken=new; mid=m; stuid=42"));
 
-        assertThat(service.find("qq:A").orElseThrow().stoken()).isEqualTo("new");
+        assertThat(service.credentialOf("qq:A").orElseThrow().stoken()).isEqualTo("new");
+    }
+
+    /**
+     * 来源要跟着"最近一次写入"走，而不是启动时的快照。
+     *
+     * <p>这条是 2026-11-20 删 {@code CredentialProvider} 的回归用例：
+     * 那个类在启动时拍了一份凭据快照，扫码换绑后 {@code /api/auth/status} 还会报旧 uid。
+     */
+    @Test
+    void sourceFollowsTheMostRecentWrite() throws IOException {
+        AccountService service = new AccountService(store(),
+                legacy("ltoken=legacy; ltuid=7"), "local", "");
+
+        assertThat(service.sourceOf("local")).isEqualTo(AccountService.Source.LEGACY);
+
+        service.save("local", Credential.of("ltoken=fresh; ltuid=42"));
+
+        assertThat(service.sourceOf("local")).isEqualTo(AccountService.Source.ACCOUNT);
+        assertThat(service.credentialOf("local").orElseThrow().uid()).isEqualTo("42");
+    }
+
+    @Test
+    void envIsTheLastResortAndOnlyForLocalUser() {
+        AccountService service = new AccountService(store(), none(), "local", "ltoken=env; ltuid=9");
+
+        assertThat(service.sourceOf("local")).isEqualTo(AccountService.Source.ENV);
+        assertThat(service.sourceOf("qq:someone")).isEqualTo(AccountService.Source.NONE);
+        assertThat(service.sourceOf(null)).isEqualTo(AccountService.Source.NONE);
     }
 }

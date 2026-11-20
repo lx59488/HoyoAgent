@@ -2,11 +2,11 @@ package com.luobo.hoyoagent.mihoyo.auth;
 
 import com.luobo.hoyoagent.common.exception.BusinessException;
 import com.luobo.hoyoagent.common.exception.ErrorCode;
+import com.luobo.hoyoagent.common.log.Mask;
 import com.luobo.hoyoagent.mihoyo.auth.passport.PassportClient;
 import com.luobo.hoyoagent.mihoyo.credential.AccountService;
 import com.luobo.hoyoagent.mihoyo.credential.CookieJar;
 import com.luobo.hoyoagent.mihoyo.credential.Credential;
-import com.luobo.hoyoagent.mihoyo.credential.CredentialProvider;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -14,7 +14,6 @@ import tools.jackson.databind.JsonNode;
 
 import java.time.Duration;
 import java.time.Instant;
-import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -49,7 +48,7 @@ public class QrLoginService {
         PassportClient.QrTicket ticket = passport.createAppQrLogin();
         Session session = new Session(ticket.ticket(), ticket.url(), Instant.now(), ownerId);
         sessions.put(ticket.ticket(), session);
-        log.info("已创建登录二维码，ticket={}", shortTicket(ticket.ticket()));
+        log.info("已创建登录二维码，ticket={}", Mask.prefix(ticket.ticket(), 8));
         return new Start(ticket.ticket(), ticket.url(), TTL.toSeconds(), session.state);
     }
 
@@ -80,7 +79,7 @@ public class QrLoginService {
             default -> {
                 session.state = "FAILED";
                 session.message = "米游社返回异常 retcode=" + poll.retcode();
-                log.warn("扫码轮询失败: ticket={} retcode={}", shortTicket(ticket), poll.retcode());
+                log.warn("扫码轮询失败: ticket={} retcode={}", Mask.prefix(ticket, 8), poll.retcode());
             }
         }
         return session.status();
@@ -108,14 +107,14 @@ public class QrLoginService {
      * 那就是 {@code ltoken_v2} 过期了，调一次这里即可。
      */
     public RefreshResult refreshV2(String ownerId) {
-        Credential current = accounts.find(ownerId).orElseThrow(() ->
+        Credential current = accounts.credentialOf(ownerId).orElseThrow(() ->
                 new BusinessException(ErrorCode.MOYO_AUTH_EXPIRED, "当前账号未绑定，请先扫码"));
         if (!current.hasStoken() || current.mid() == null || current.mid().isBlank()) {
             throw new BusinessException(ErrorCode.MOYO_AUTH_EXPIRED, "当前凭据缺少 stoken/mid，请重新扫码绑定");
         }
         CookieJar v2 = passport.exchangeV2(current.stoken(), current.mid());
         CookieJar merged = current.cookies().merge(v2);
-        Credential refreshed  = current.withCookies(merged);
+        Credential refreshed = current.withCookies(merged);
         accounts.save(accounts.localUserId(), refreshed); // 同上
         return new RefreshResult(merged.has("ltoken_v2"), merged.has("cookie_token_v2"),
                 merged.has("ltoken_v2") ? "v2 凭据已刷新" : "刷新成功，但响应里没有 ltoken_v2");
@@ -138,7 +137,7 @@ public class QrLoginService {
 
         if (stoken.isBlank() || mid.isBlank()) {
             session.finish("FAILED", "扫码确认了，但响应里没有 stoken/mid");
-            log.warn("扫码确认但缺少 stoken/mid，ticket={}", shortTicket(session.ticket));
+            log.warn("扫码确认但缺少 stoken/mid，ticket={}", Mask.prefix(session.ticket, 8));
             return;
         }
 
@@ -200,10 +199,6 @@ public class QrLoginService {
 
     private void purgeExpired() {
         sessions.entrySet().removeIf(e -> e.getValue().isExpired());
-    }
-
-    private static String shortTicket(String ticket) {
-        return ticket == null || ticket.length() < 8 ? "***" : ticket.substring(0, 8) + "…";
     }
 
     public record Start(String ticket, String url, long expiresInSeconds, String state) {

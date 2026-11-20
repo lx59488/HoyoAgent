@@ -54,12 +54,4 @@ public class SessionRegistry {
     public String localUserId() {
         return localUserId;
     }
-
-    /** 日志用：openid 这类平台 id 只留首尾各 4 位。 */
-    public static String mask(String text) {
-        if (text == null || text.isBlank()) {
-            return "***";
-        }
-        return text.length() <= 8 ? "***" : text.substring(0, 4) + "***" + text.substring(text.length() - 4);
-    }
 }

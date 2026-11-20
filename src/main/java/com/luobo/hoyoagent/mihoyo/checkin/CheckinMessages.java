@@ -24,7 +24,7 @@ public final class CheckinMessages {
             text.append("（").append(record.kind()).append("）");
         }
         text.append('\n');
-        for (CheckinService.RoleResult role : record.roles()) {
+        for (CheckinRoleResult role : record.roles()) {
             text.append(role.gameName()).append(' ').append(role.uid()).append("：").append(role.message());
             if (role.totalDays() > 0) {
                 text.append(" · 累计 ").append(role.totalDays()).append(" 天");

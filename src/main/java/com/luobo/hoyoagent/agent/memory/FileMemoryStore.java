@@ -25,9 +25,9 @@ import java.util.*;
 import java.util.stream.Stream;
 
 @Component
-public class FileMemoryPersistence implements MemoryPersistence {
+public class FileMemoryStore implements MemoryStore {
 
-    private static final Logger log = LoggerFactory.getLogger(FileMemoryPersistence.class);
+    private static final Logger log = LoggerFactory.getLogger(FileMemoryStore.class);
 
     /** 磁盘格式版本。不认识的版本一律当"没有记忆"——和 CheckinRecordStore 的约定一致。 */
     private static final int FORMAT_VERSION = 1;
@@ -36,7 +36,7 @@ public class FileMemoryPersistence implements MemoryPersistence {
     private final Duration retention;
     private final ObjectMapper mapper;
 
-    public FileMemoryPersistence(@Value("${hoyo.memory.dir:}") String dir,
+    public FileMemoryStore(@Value("${hoyo.memory.dir:}") String dir,
                                  @Value("${hoyo.memory.retention:30d}") Duration retention,
                                  ObjectMapper mapper) {
         this.root = dir == null || dir.isBlank()

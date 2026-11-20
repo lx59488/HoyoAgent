@@ -1,13 +1,12 @@
-package com.luobo.hoyoagent.mihoyo.record;
+package com.luobo.hoyoagent.mihoyo.gamerecord;
 
 import com.luobo.hoyoagent.common.exception.BusinessException;
 import com.luobo.hoyoagent.common.exception.ErrorCode;
 import com.luobo.hoyoagent.mihoyo.MihoyoEndpoints;
 import com.luobo.hoyoagent.mihoyo.credential.Credential;
-import com.luobo.hoyoagent.mihoyo.credential.CredentialProvider;
 import com.luobo.hoyoagent.mihoyo.client.DeviceIdProvider;
 import com.luobo.hoyoagent.mihoyo.dto.GameRole;
-import com.luobo.hoyoagent.mihoyo.enums.MiyousheHost;
+import com.luobo.hoyoagent.mihoyo.enums.MihoyoHost;
 import com.luobo.hoyoagent.mihoyo.transport.MihoyoHttp;
 import com.luobo.hoyoagent.mihoyo.transport.MihoyoRequest;
 import com.luobo.hoyoagent.mihoyo.transport.MihoyoResult;
@@ -25,7 +24,7 @@ import java.util.Map;
  * 且新账号上恒返回 {@code 5003}（旧账号同请求正常，已确认是账号侧），继续维护没有收益。
  * 依赖它的 {@code PlayerTool} / {@code PlayerService} / {@code CharacterDto} 一并移除。
  *
- * <p>身份来自 {@link CredentialProvider}（cookie）与 {@link DeviceIdProvider}（device_id），
+ * <p>身份来自 {@link AccountService}（cookie）与 {@link DeviceIdProvider}（device_id），
  * 头部由 {@link Profiles#RECORD} 统一给出——这里不再自己 new OkHttp、也不自己拼 header。
  */
 @Component
@@ -48,7 +47,7 @@ public class RecordClient {
     /** 该 cookie 绑定的游戏角色（不需要 DS，但需要 cookie）。 */
     public List<GameRole> roles(Credential credential) {
         MihoyoResult result = http.send(MihoyoRequest.get(
-                endpoints.baseUrl(MiyousheHost.TAKUMI) + "/binding/api/getUserGameRolesByCookie",
+                endpoints.baseUrl(MihoyoHost.TAKUMI) + "/binding/api/getUserGameRolesByCookie",
                 Map.of(), headers(credential)));
         ensureOk(result, "读取绑定角色");
 
@@ -65,7 +64,7 @@ public class RecordClient {
     /** 公开接口：不需要 cookie，也不需要 DS。 */
     public JsonNode getAppConfig(int gids) {
         MihoyoResult result = http.send(MihoyoRequest.get(
-                endpoints.baseUrl(MiyousheHost.BBS) + "/apihub/wapi/getAppConfig",
+                endpoints.baseUrl(MihoyoHost.BBS) + "/apihub/wapi/getAppConfig",
                 Map.of("gids", String.valueOf(gids)),
                 Profiles.RECORD.headers(null, deviceId.get(), null, null, "")));
         ensureOk(result, "读取 App 配置");

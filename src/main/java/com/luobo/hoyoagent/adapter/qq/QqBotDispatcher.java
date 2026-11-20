@@ -1,5 +1,7 @@
 package com.luobo.hoyoagent.adapter.qq;
 
+import com.luobo.hoyoagent.common.log.Mask;
+
 import com.luobo.hoyoagent.agent.AgentChatService;
 import com.luobo.hoyoagent.channel.SessionRegistry;
 import com.luobo.hoyoagent.channel.TextChunker;
@@ -84,14 +86,14 @@ public class QqBotDispatcher {
             return;
         }
         if (!markSeen(msgId)) {
-            log.info("[QQ] 忽略：重复事件 msgId={}", QqBotProperties.mask(msgId));
+            log.info("[QQ] 忽略：重复事件 msgId={}", Mask.id(msgId));
             return;
         }
 
         String userId = "qq:" + openid;
         String sessionId = "qqbot:c2c:" + openid;
         sessions.register(sessionId, userId);      // 每条消息都注册：重启后第一条就恢复映射
-        log.info("[QQ] ← {} [{}] {}", QqBotProperties.mask(openid), sessionId, abbreviate(text));
+        log.info("[QQ] ← {} [{}] {}", Mask.id(openid), sessionId, abbreviate(text));
         // 绑定是确定性动作：命中关键词就直接走流程，不进模型
         BindingService.Intent intent = binding.intentOf(text);
         if (intent != BindingService.Intent.NONE) {
@@ -113,7 +115,7 @@ public class QqBotDispatcher {
         int sent = 0;
         for (int i = 0; i < chunks.size(); i++) {
             try {
-                if (api.sendC2c(openid, chunks.get(i), msgId, i + 1)) {   // msg_seq 从 1 开始
+                if (api.sendC2C(openid, chunks.get(i), msgId, i + 1)) {   // msg_seq 从 1 开始
                     sent++;
                 }
             } catch (RuntimeException e) {
@@ -121,22 +123,22 @@ public class QqBotDispatcher {
                 log.warn("[QQ] 第 {} 条发送失败：{}", i + 1, e.toString());
             }
         }
-        log.info("[QQ] → {} 回复 {} 字，{} 条（成功 {}）", QqBotProperties.mask(openid), reply.length(), chunks.size(), sent);
+        log.info("[QQ] → {} 回复 {} 字，{} 条（成功 {}）", Mask.id(openid), reply.length(), chunks.size(), sent);
     }
 
     /** 绑定/换绑/解绑：三条确定性路径，最多用 3 个 msg_seq（图片 1、引导 2、回执 3）。 */
     private void handleBinding(String openid, String userId, BindingService.Intent intent, String msgId) {
         if (intent == BindingService.Intent.UNBIND) {
             boolean removed = binding.unbind(userId);
-            api.sendC2c(openid, removed ? "已解绑，本机保存的凭据也删掉了。" : "你还没有绑定米游社账号。",
+            api.sendC2C(openid, removed ? "已解绑，本机保存的凭据也删掉了。" : "你还没有绑定米游社账号。",
                     msgId, 1);
             return;
         }
 
         if (intent == BindingService.Intent.START && accounts.isBound(userId)) {
             // 覆盖是不可逆的：先问一句，别让"绑定"两个字把现有账号冲掉
-            String uid = accounts.find(userId).map(Credential::uid).orElse("");
-            api.sendC2c(openid, "当前已绑定米游社 uid " + maskUid(uid)
+            String uid = accounts.credentialOf(userId).map(Credential::uid).orElse("");
+            api.sendC2C(openid, "当前已绑定米游社 uid " + Mask.tail(uid, 4)
                     + "，继续会覆盖。回复「确认换绑」再发新二维码。", msgId, 1);
             return;
         }
@@ -145,22 +147,22 @@ public class QqBotDispatcher {
         try {
             qr = binding.start(userId);
         } catch (BusinessException e) {
-            api.sendC2c(openid, e.getMessage(), msgId, 1);
+            api.sendC2C(openid, e.getMessage(), msgId, 1);
             return;
         }
 
-        if (!api.sendC2cImage(openid, qr.png(), msgId, 1)) {
-            api.sendC2c(openid, "二维码发送失败，稍后再试。", msgId, 2);
+        if (!api.sendC2CImage(openid, qr.png(), msgId, 1)) {
+            api.sendC2C(openid, "二维码发送失败，稍后再试。", msgId, 2);
             return;
         }
-        api.sendC2c(openid, "用米游社 App 扫这张图，" + (qr.expiresInSeconds() / 60) + " 分钟内有效。",
+        api.sendC2C(openid, "用米游社 App 扫这张图，" + (qr.expiresInSeconds() / 60) + " 分钟内有效。",
                 msgId, 2);
 
         if (!binding.acquirePoller(qr.ticket())) {
             log.info("[QQ] 这张码已经有轮询线程，跳过");
             return;
         }
-        Thread.ofVirtual().name("qq-bind-" + QqBotProperties.mask(openid))
+        Thread.ofVirtual().name("qq-bind-" + Mask.id(openid))
                 .start(() -> awaitBind(openid, userId, qr.ticket(), msgId));
     }
 
@@ -185,30 +187,23 @@ public class QqBotDispatcher {
                     continue;
                 }
                 last = status.state();
-                log.info("[QQ] 绑定状态 {} → {}（user={}）", QqBotProperties.mask(openid),
-                        status.state(), QqBotProperties.mask(userId));
+                log.info("[QQ] 绑定状态 {} → {}（user={}）", Mask.id(openid),
+                        status.state(), Mask.id(userId));
 
                 String reply = switch (status.state()) {
-                    case "BOUND" -> "绑定成功：米游社 uid " + maskUid(status.uid());
+                    case "BOUND" -> "绑定成功：米游社 uid " + Mask.tail(status.uid(), 4);
                     case "EXPIRED" -> "二维码过期了，回复「绑定」重新生成。";
                     case "FAILED" -> "绑定失败：" + status.message();
                     default -> "";
                 };
                 if (!reply.isEmpty()) {
-                    api.sendC2c(openid, reply, msgId, 3);
+                    api.sendC2C(openid, reply, msgId, 3);
                     return;
                 }
             }
         } finally {
             binding.releasePoller(ticket);
         }
-    }
-
-    private static String maskUid(String uid) {
-        if (uid == null || uid.isBlank()) {
-            return "***";
-        }
-        return uid.length() <= 4 ? "***" : "***" + uid.substring(uid.length() - 4);
     }
 
     private static void sleep(long millis) {

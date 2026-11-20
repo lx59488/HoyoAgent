@@ -2,7 +2,7 @@ package com.luobo.hoyoagent.adapter.http;
 
 import com.luobo.hoyoagent.agent.MihoyoAssistant;
 import com.luobo.hoyoagent.agent.memory.SessionMemoryStore;
-import com.luobo.hoyoagent.common.result.Result;
+import com.luobo.hoyoagent.common.result.ApiResult;
 import dev.langchain4j.agent.tool.ToolExecutionRequest;
 import dev.langchain4j.data.message.AiMessage;
 import dev.langchain4j.data.message.ChatMessage;
@@ -37,19 +37,19 @@ public class MemoryController {
     }
 
     @GetMapping("/{sessionId}")
-    public Result<SessionView> peek(@PathVariable("sessionId") String sessionId) {
+    public ApiResult<SessionView> peek(@PathVariable("sessionId") String sessionId) {
         List<ChatMessage> messages = memoryStore.snapshot(sessionId);
-        return Result.success(new SessionView(sessionId, messages.size(),
+        return ApiResult.success(new SessionView(sessionId, messages.size(),
                 memoryStore.expired(sessionId),
                 messages.stream().map(MemoryController::view).toList()));
     }
 
     /** 清空一条会话：先删消息，再让框架放掉那个 ChatMemory 实例。 */
     @DeleteMapping("/{sessionId}")
-    public Result<SessionView> clear(@PathVariable("sessionId") String sessionId) {
+    public ApiResult<SessionView> clear(@PathVariable("sessionId") String sessionId) {
         memoryStore.deleteMessages(sessionId);
         assistant.evictChatMemory(sessionId);
-        return Result.success(new SessionView(sessionId, 0, false, List.of()));
+        return ApiResult.success(new SessionView(sessionId, 0, false, List.of()));
     }
 
     private static MessageView view(ChatMessage message) {

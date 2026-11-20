@@ -3,7 +3,6 @@ package com.luobo.hoyoagent.mihoyo.checkin;
 import com.luobo.hoyoagent.common.exception.BusinessException;
 import com.luobo.hoyoagent.common.exception.ErrorCode;
 import com.luobo.hoyoagent.mihoyo.checkin.dto.LunaInfo;
-import com.luobo.hoyoagent.mihoyo.credential.AccountService;
 import com.luobo.hoyoagent.mihoyo.credential.Credential;
 import com.luobo.hoyoagent.mihoyo.dto.GameRole;
 import com.luobo.hoyoagent.mihoyo.error.ErrorKind;
@@ -38,40 +37,32 @@ public class CheckinService {
 
     private final GameRoleService roleService;
 
-    private final AccountService accounts;
-
     private final LunaClient luna;
 
     private final ObjectMapper mapper;
 
-    public CheckinService(GameRoleService roleService, LunaClient luna, ObjectMapper mapper, AccountService accounts) {
+    public CheckinService(GameRoleService roleService, LunaClient luna, ObjectMapper mapper) {
         this.roleService = roleService;
         this.luna = luna;
         this.mapper = mapper;
-        this.accounts = accounts;
     }
 
-    /** 临时桥：M1-c 之后由工具直接传凭据，这个无参版本就可以删了。 */
-    public Summary checkinAll() {
-        return checkinAll(accounts.require(accounts.localUserId()));
-    }
-
-    public Summary checkinAll(Credential credential) {
+    public CheckinRunResult checkinAll(Credential credential) {
         List<GameRole> roles;
         try {
             roles = roleService.roles(credential);
         } catch (BusinessException e) {
-            return new Summary(List.of(), "读取绑定角色失败：" + e.getMessage(), kindOf(e));
+            return new CheckinRunResult(List.of(), "读取绑定角色失败：" + e.getMessage(), kindOf(e));
         }
 
         List<GameRole> supported = roles.stream()
                 .filter(r -> CheckinGame.of(r.gameBiz()).isPresent())
                 .toList();
         if (supported.isEmpty()) {
-            return new Summary(List.of(), "当前账号没有可签到的角色（原神/星铁/绝区零）");
+            return new CheckinRunResult(List.of(), "当前账号没有可签到的角色（原神/星铁/绝区零）");
         }
 
-        List<RoleResult> results = new ArrayList<>();
+        List<CheckinRoleResult> results = new ArrayList<>();
         for (int i = 0; i < supported.size(); i++) {
             GameRole role = supported.get(i);
             CheckinGame game = CheckinGame.of(role.gameBiz()).orElseThrow();
@@ -80,10 +71,10 @@ public class CheckinService {
                 pause();
             }
         }
-        return new Summary(results, summarize(results));
+        return new CheckinRunResult(results, summarize(results));
     }
 
-    private RoleResult checkinOne(Credential credential, CheckinGame game, GameRole role) {
+    private CheckinRoleResult checkinOne(Credential credential, CheckinGame game, GameRole role) {
         MihoyoResult result = luna.info(credential, game, role.region(), role.gameUid());
         if (!result.ok()) {
             return fail(game, role, result.error(), 0);
@@ -91,13 +82,13 @@ public class CheckinService {
         LunaInfo info = mapper.treeToValue(result.data(), LunaInfo.class);
 
         if (info.isFirstBind()) {
-            return new RoleResult(game.gameBiz(), game.displayName(), role.gameUid(), role.region(),
+            return new CheckinRoleResult(game.gameBiz(), game.displayName(), role.gameUid(), role.region(),
                     "FIRST_BIND", "还没在米游社绑定这个角色，先去 App 里绑定再签", 0, "", null);
         }
 
         int days = info.totalSignDay();
         if (info.isSign()) {
-            return new RoleResult(game.gameBiz(), game.displayName(), role.gameUid(), role.region(),
+            return new CheckinRoleResult(game.gameBiz(), game.displayName(), role.gameUid(), role.region(),
                     "ALREADY", "今天已经签过了", days, reward(credential, game, days), null);
         }
 
@@ -106,7 +97,7 @@ public class CheckinService {
             return fail(game, role, sign.error(), days);
         }
         if (sign.data().path("success").asInt(0) != 0) {
-            return new RoleResult(game.gameBiz(), game.displayName(), role.gameUid(), role.region(),
+            return new CheckinRoleResult(game.gameBiz(), game.displayName(), role.gameUid(), role.region(),
                     "CAPTCHA", "签到触发了人机验证，需要去米游社 App 手动签一次", days, "",
                     ErrorKind.NEED_VERIFY);
         }
@@ -114,13 +105,13 @@ public class CheckinService {
         // 复验：sign 返回 0 不等于真的签上了
         MihoyoResult after = luna.info(credential, game, role.region(), role.gameUid());
         if (!after.ok() || !after.data().path("is_sign").asBoolean(false)) {
-            return new RoleResult(game.gameBiz(), game.displayName(), role.gameUid(), role.region(),
+            return new CheckinRoleResult(game.gameBiz(), game.displayName(), role.gameUid(), role.region(),
                     "FAILED", "签到请求返回成功，但复验未通过", days, "", ErrorKind.UNKNOWN);
         }
 
         int afterDays = after.data().path("total_sign_day").asInt(days);
         log.info("签到成功: {} uid={} 累计 {} 天", game.displayName(), role.gameUid(), afterDays);
-        return new RoleResult(game.gameBiz(), game.displayName(), role.gameUid(), role.region(),
+        return new CheckinRoleResult(game.gameBiz(), game.displayName(), role.gameUid(), role.region(),
                 "SIGNED", "签到成功", afterDays, reward(credential, game, afterDays), null);
     }
 
@@ -144,8 +135,8 @@ public class CheckinService {
         }
     }
 
-    private static RoleResult fail(CheckinGame game, GameRole role, MihoyoError error, int days) {
-        return new RoleResult(game.gameBiz(), game.displayName(), role.gameUid(), role.region(),
+    private static CheckinRoleResult fail(CheckinGame game, GameRole role, MihoyoError error, int days) {
+        return new CheckinRoleResult(game.gameBiz(), game.displayName(), role.gameUid(), role.region(),
                 "FAILED", error.userMessage(), days, "", error.kind());
     }
 
@@ -167,7 +158,7 @@ public class CheckinService {
         return ErrorKind.UNKNOWN;
     }
 
-    private static String summarize(List<RoleResult> results) {
+    private static String summarize(List<CheckinRoleResult> results) {
         long signed = results.stream().filter(r -> "SIGNED".equals(r.status())).count();
         long already = results.stream().filter(r -> "ALREADY".equals(r.status())).count();
         long failed = results.size() - signed - already;
@@ -188,38 +179,6 @@ public class CheckinService {
             Thread.sleep(BETWEEN_ROLES_MS);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
-        }
-    }
-
-    /**
-     * status: SIGNED（今天新签）/ ALREADY / FIRST_BIND / CAPTCHA / FAILED。
-     *
-     * <p>{@code kind} 是失败类别（AUTH / RISK / NEED_VERIFY…），成功时为 {@code null}。
-     * 有了它，调度器不用去正则匹配中文文案就能判断"该不该提示重新扫码"。
-     */
-    public record RoleResult(String gameBiz,
-                             String gameName,
-                             String uid,
-                             String region,
-                             String status,
-                             String message,
-                             int totalDays,
-                             String reward,
-                             ErrorKind kind) {
-
-        /** 这一个角色今天算过关了吗（新签或本来签过）。 */
-        public boolean ok() {
-            return "SIGNED".equals(status) || "ALREADY".equals(status);
-        }
-    }
-
-    /**
-     * @param kind 整轮最需要处理的失败类别；全部成功时为 {@code null}
-     */
-    public record Summary(List<RoleResult> results, String message, ErrorKind kind) {
-
-        public Summary(List<RoleResult> results, String message) {
-            this(results, message, null);
         }
     }
 }

@@ -19,13 +19,13 @@ class SessionMemoryStorePersistenceTest {
     @TempDir
     Path tempDir;
 
-    private FileMemoryPersistence persistence;
+    private FileMemoryStore persistence;
 
     private final MemoryProperties properties = new MemoryProperties(20, 200, Duration.ofHours(2));
 
     @BeforeEach
     void setUp() {
-        persistence = new FileMemoryPersistence(tempDir.toString(), Duration.ofDays(30), new ObjectMapper());
+        persistence = new FileMemoryStore(tempDir.toString(), Duration.ofDays(30), new ObjectMapper());
     }
 
     @Test

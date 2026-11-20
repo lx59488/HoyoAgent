@@ -1,18 +1,12 @@
 package com.luobo.hoyoagent.adapter.http;
 
-import com.google.zxing.BarcodeFormat;
-import com.google.zxing.EncodeHintType;
-import com.google.zxing.MultiFormatWriter;
-import com.google.zxing.client.j2se.MatrixToImageWriter;
-import com.google.zxing.common.BitMatrix;
 import com.luobo.hoyoagent.common.exception.BusinessException;
 import com.luobo.hoyoagent.common.exception.ErrorCode;
-import com.luobo.hoyoagent.common.result.Result;
+import com.luobo.hoyoagent.common.result.ApiResult;
 import com.luobo.hoyoagent.mihoyo.auth.QrImage;
 import com.luobo.hoyoagent.mihoyo.auth.QrLoginService;
 import com.luobo.hoyoagent.mihoyo.credential.AccountService;
 import com.luobo.hoyoagent.mihoyo.credential.Credential;
-import com.luobo.hoyoagent.mihoyo.credential.CredentialProvider;
 import com.luobo.hoyoagent.mihoyo.dto.GameRole;
 import com.luobo.hoyoagent.mihoyo.role.GameRoleService;
 import org.springframework.http.CacheControl;
@@ -24,9 +18,7 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
-import java.io.ByteArrayOutputStream;
 import java.util.List;
-import java.util.Map;
 
 /**
  * 绑定米游社账号的 HTTP 入口。
@@ -39,6 +31,9 @@ import java.util.Map;
  * </pre>
  *
  * <p>响应里永远不出现凭据：只回 {@code uid}、掩码后的 {@code mid} 和"有没有拿到某个 token"。
+ *
+ * <p>凭据来源只有 {@link AccountService} 一个（2026-11-20 删掉 {@code CredentialProvider} 之后）：
+ * 它和工具、签到读的是同一份缓存，换绑后状态页不会再有"旧号残留"。
  */
 @RestController
 @RequestMapping("/api/auth")
@@ -48,29 +43,25 @@ public class AuthController {
 
     private final GameRoleService roleService;
 
-    private final CredentialProvider credentials;
-
     private final AccountService accounts;
 
-
-    public AuthController(QrLoginService qrLogin, GameRoleService roleService,
-                          CredentialProvider credentials, AccountService accounts) {
+    public AuthController(QrLoginService qrLogin, GameRoleService roleService, AccountService accounts) {
         this.qrLogin = qrLogin;
         this.roleService = roleService;
-        this.credentials = credentials;
         this.accounts = accounts;
     }
 
     /** 当前绑定状态（给调试页用；不含任何凭据值）。 */
     @GetMapping("/status")
-    public Result<AuthStatus> status() {
-        Credential credential = credentials.get();
-        return Result.success(new AuthStatus(
-                credentials.userId(),
-                credentials.source(),
+    public ApiResult<AuthStatus> status() {
+        String userId = accounts.localUserId();
+        Credential credential = accounts.credentialOf(userId).orElse(Credential.empty());
+        return ApiResult.success(new AuthStatus(
+                userId,
+                accounts.sourceOf(userId),
                 credential.uid(),
                 credential.midMasked(),
-                credentials.isPresent(),
+                credential.hasCookie(),
                 credential.hasStoken(),
                 credential.has("ltoken"),
                 credential.has("ltoken_v2"),
@@ -78,24 +69,24 @@ public class AuthController {
     }
 
     @PostMapping("/qr")
-    public Result<QrLoginService.Start> start() {
-        return Result.success(qrLogin.start(accounts.localUserId()));
+    public ApiResult<QrLoginService.Start> start() {
+        return ApiResult.success(qrLogin.start(accounts.localUserId()));
     }
 
     @GetMapping("/qr/{ticket}")
-    public Result<QrLoginService.Status> status(@PathVariable String ticket) {
-        return Result.success(qrLogin.poll(accounts.localUserId(), ticket));
+    public ApiResult<QrLoginService.Status> status(@PathVariable String ticket) {
+        return ApiResult.success(qrLogin.poll(accounts.localUserId(), ticket));
     }
 
     /** 当前凭据下绑定的游戏角色（调试用；不含凭据）。 */
     @GetMapping("/roles")
-    public Result<List<GameRole>> roles() {
-        return Result.success(roleService.roles(credentials.get()));
+    public ApiResult<List<GameRole>> roles() {
+        return ApiResult.success(roleService.roles(accounts.requireCredential(accounts.localUserId())));
     }
 
     @PostMapping("/refresh")
-    public Result<QrLoginService.RefreshResult> refresh() {
-        return Result.success(qrLogin.refreshV2(accounts.localUserId()));
+    public ApiResult<QrLoginService.RefreshResult> refresh() {
+        return ApiResult.success(qrLogin.refreshV2(accounts.localUserId()));
     }
 
     @GetMapping(value = "/qr/{ticket}/image", produces = MediaType.IMAGE_PNG_VALUE)
@@ -111,7 +102,7 @@ public class AuthController {
     }
 
     public record AuthStatus(String userId,
-                             String source,
+                             AccountService.Source source,
                              String uid,
                              String mid,
                              boolean bound,

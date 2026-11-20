@@ -1,5 +1,7 @@
 package com.luobo.hoyoagent.agent.tool;
 
+import com.luobo.hoyoagent.common.log.Mask;
+
 import com.luobo.hoyoagent.agent.observability.ToolCallRecorder;
 import com.luobo.hoyoagent.channel.SessionRegistry;
 import com.luobo.hoyoagent.common.exception.BusinessException;
@@ -42,11 +44,11 @@ public class CheckinOverviewTool {
             """)
     public String getCheckinOverview(@ToolMemoryId String memoryId) {
         String userId = sessions.userIdOrLocal(memoryId);
-        log.info("[TOOL] getCheckinOverview user={}", SessionRegistry.mask(userId));
+        log.info("[TOOL] getCheckinOverview user={}", Mask.id(userId));
         recorder.record("getCheckinOverview", "");
         try {
             // 用 find 而不是 require：未绑定时要回"友好总览"，不是抛异常
-            return format(service.overview(userId, accounts.find(userId).orElse(null)));
+            return format(service.overview(userId, accounts.credentialOf(userId).orElse(null)));
         } catch (BusinessException e) {
             return "【结论】查询签到总览失败：" + e.getMessage();
         }

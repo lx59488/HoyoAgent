@@ -2,7 +2,7 @@ package com.luobo.hoyoagent.mihoyo.role;
 
 import com.luobo.hoyoagent.mihoyo.credential.Credential;
 import com.luobo.hoyoagent.mihoyo.dto.GameRole;
-import com.luobo.hoyoagent.mihoyo.record.RecordClient;
+import com.luobo.hoyoagent.mihoyo.gamerecord.RecordClient;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;

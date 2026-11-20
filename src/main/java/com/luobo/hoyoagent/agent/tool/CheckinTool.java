@@ -1,8 +1,12 @@
 package com.luobo.hoyoagent.agent.tool;
 
+import com.luobo.hoyoagent.common.log.Mask;
+
 import com.luobo.hoyoagent.agent.observability.ToolCallRecorder;
 import com.luobo.hoyoagent.channel.SessionRegistry;
 import com.luobo.hoyoagent.common.exception.BusinessException;
+import com.luobo.hoyoagent.mihoyo.checkin.CheckinRoleResult;
+import com.luobo.hoyoagent.mihoyo.checkin.CheckinRunResult;
 import com.luobo.hoyoagent.mihoyo.checkin.CheckinService;
 import com.luobo.hoyoagent.mihoyo.credential.AccountService;
 import dev.langchain4j.agent.tool.Tool;
@@ -48,12 +52,12 @@ public class CheckinTool {
             + "只能签当前账号，不接受指定其他玩家")
     public String checkinToday(@ToolMemoryId String memoryId) {
         String userId = sessions.userIdOrLocal(memoryId);
-        log.info("[TOOL] checkinToday user={}", SessionRegistry.mask(userId));
+        log.info("[TOOL] checkinToday user={}", Mask.id(userId));
         recorder.record("checkinToday", "");
 
-        CheckinService.Summary summary;
+        CheckinRunResult summary;
         try {
-            summary = checkinService.checkinAll(accounts.require(userId));
+            summary = checkinService.checkinAll(accounts.requireCredential(userId));
         } catch (BusinessException e) {
             return "【结论】签到失败：" + e.getMessage();
         }
@@ -74,7 +78,7 @@ public class CheckinTool {
         return "【结论】%s\n【数据】\n%s".formatted(summary.message(), lines);
     }
 
-    private static String describe(CheckinService.RoleResult result) {
+    private static String describe(CheckinRoleResult result) {
         return switch (result.status()) {
             case "SIGNED" -> "签到成功";
             case "ALREADY" -> "今天已经签过";

@@ -32,10 +32,10 @@ class CheckinRecordStoreTest {
 
     @Test
     void saveThenFindRoundTripsEveryField() {
-        List<CheckinService.RoleResult> roles = List.of(
-                new CheckinService.RoleResult("hk4e_cn", "原神", "100848866", "cn_gf01",
+        List<CheckinRoleResult> roles = List.of(
+                new CheckinRoleResult("hk4e_cn", "原神", "100848866", "cn_gf01",
                         "SIGNED", "签到成功", 12, "「原石」x60", null),
-                new CheckinService.RoleResult("hkrpg_cn", "崩坏：星穹铁道", "103871907", "prod_gf_cn",
+                new CheckinRoleResult("hkrpg_cn", "崩坏：星穹铁道", "103871907", "prod_gf_cn",
                         "FAILED", "登录状态失效，请重新扫码绑定", 7, "", ErrorKind.AUTH));
         CheckinRecord record = new CheckinRecord(
                 "local", "2026-11-13", CheckinRecord.Trigger.SCHEDULED, CheckinRecord.Outcome.PARTIAL,

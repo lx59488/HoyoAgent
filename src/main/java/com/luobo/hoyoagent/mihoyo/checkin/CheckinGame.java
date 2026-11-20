@@ -1,5 +1,7 @@
 package com.luobo.hoyoagent.mihoyo.checkin;
 
+import com.luobo.hoyoagent.mihoyo.enums.MihoyoHost;
+
 import java.util.Arrays;
 import java.util.Optional;
 
@@ -9,19 +11,23 @@ import java.util.Optional;
  * <p>{@code act_id} 是**活动常量**，不是"每期变"——FufuLauncher 用了两年多没改过
  * （原神 {@code e202311201442471}）。之前文档里"每期变、要从活动信息接口取"的说法是错的。
  *
- * <p>绝区零的 host 和路径都不同（{@code act-nap-api} + {@code /event/luna/zzz}），
+ * <p>绝区零的 host 和路径都不同（{@link MihoyoHost#NAP} + {@code /event/luna/zzz}），
  * 不能简单把 act_id 换掉就用。
+ *
+ * <p>2026-11-20：host 不再写成字面量，而是 {@link MihoyoHost} 枚举 + {@code MihoyoEndpoints} 解析。
+ * 之前这里硬编码 {@code https://api-takumi.mihoyo.com}，导致 {@code hoyo.hosts} 只覆盖了
+ * 战绩/passport 两条路由，签到会偷偷绕过配置打真网。
  */
 public enum CheckinGame {
 
     GENSHIN("hk4e_cn", "原神", "e202311201442471",
-            "https://api-takumi.mihoyo.com", "/event/luna", "https://act.mihoyo.com/", "hk4e"),
+            MihoyoHost.TAKUMI, "/event/luna", "https://act.mihoyo.com/", "hk4e"),
 
     STAR_RAIL("hkrpg_cn", "崩坏：星穹铁道", "e202304121516551",
-            "https://api-takumi.mihoyo.com", "/event/luna", "https://act.mihoyo.com/", null),
+            MihoyoHost.TAKUMI, "/event/luna", "https://act.mihoyo.com/", null),
 
     ZZZ("nap_cn", "绝区零", "e202406242138391",
-            "https://act-nap-api.mihoyo.com", "/event/luna/zzz", "https://act.mihoyo.com/", "zzz");
+            MihoyoHost.NAP, "/event/luna/zzz", "https://act.mihoyo.com/", "zzz");
 
     private final String gameBiz;
 
@@ -29,7 +35,7 @@ public enum CheckinGame {
 
     private final String actId;
 
-    private final String baseUrl;
+    private final MihoyoHost host;
 
     private final String lunaPath;
 
@@ -38,11 +44,11 @@ public enum CheckinGame {
     private final String signGame;
 
     CheckinGame(String gameBiz, String displayName, String actId,
-                String baseUrl, String lunaPath, String referer, String signGame) {
+                MihoyoHost host, String lunaPath, String referer, String signGame) {
         this.gameBiz = gameBiz;
         this.displayName = displayName;
         this.actId = actId;
-        this.baseUrl = baseUrl;
+        this.host = host;
         this.lunaPath = lunaPath;
         this.referer = referer;
         this.signGame = signGame;
@@ -60,16 +66,21 @@ public enum CheckinGame {
         return actId;
     }
 
+    public MihoyoHost host() {
+        return host;
+    }
+
+    /** luna 接口的路径前缀，拼在 host 之后、action 之前。 */
+    public String path() {
+        return lunaPath;
+    }
+
     public String referer() {
         return referer;
     }
 
     public String signGame() {
         return signGame;
-    }
-
-    public String url(String action) {
-        return baseUrl + lunaPath + action;
     }
 
     public static Optional<CheckinGame> of(String gameBiz) {

@@ -1,5 +1,7 @@
 package com.luobo.hoyoagent.adapter.qq;
 
+import com.luobo.hoyoagent.common.log.Mask;
+
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
@@ -33,11 +35,11 @@ class QqBotPropertiesTest {
 
     @Test
     void maskKeepsFourOnEachSideAndHidesShortIdsEntirely() {
-        assertThat(QqBotProperties.mask("1234567890ABCDEF")).isEqualTo("1234***CDEF");
-        assertThat(QqBotProperties.mask("12345678")).isEqualTo("***");
-        assertThat(QqBotProperties.mask("abc")).isEqualTo("***");
-        assertThat(QqBotProperties.mask(null)).isEqualTo("***");
-        assertThat(QqBotProperties.mask("  ")).isEqualTo("***");
+        assertThat(Mask.id("1234567890ABCDEF")).isEqualTo("1234***CDEF");
+        assertThat(Mask.id("12345678")).isEqualTo("***");
+        assertThat(Mask.id("abc")).isEqualTo("***");
+        assertThat(Mask.id(null)).isEqualTo("***");
+        assertThat(Mask.id("  ")).isEqualTo("***");
     }
 
     @Test

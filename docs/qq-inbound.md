@@ -88,13 +88,12 @@
 
 ## 5. 安全
 
-`CredentialProvider` 是**进程级单例**（`hoyo.user-id` 构造时读死，没有按 memoryId 解析的入口），
+`AccountService` 按 `userId` 解析凭据（`@ToolMemoryId` → `SessionRegistry` → `userId`），
 `CheckinTool` 也不接受身份参数（[mihoyo-auth.md](mihoyo-auth.md) §7：身份只能由框架注入）。
 
-后果很直接：**bot 一旦进群，群里任何人都能让它用你的米游社 cookie 签到，并看到你的账号数据。**
-
-所以在 P8 多账号做完之前，闸门只有一条：**白名单，且默认拒绝**。
-群聊功能不是"打开开关"的事——回复发在群里，白名单挡的是"谁能触发"，挡不住"谁能看见"。
+群聊仍然不接：`QqBotDispatcher` 直接忽略 `GROUP_AT_MESSAGE_CREATE`。白名单挡的是"谁能触发"，
+挡不住"谁能看见"——回复发在群里，白名单里任何人的签到数据都会展示给全群。
+所以在 P11-5 真机验收、以及群聊的可见性问题想清楚之前，闸门只有一条：**白名单，且默认拒绝**。
 
 ## 6. 排障
 

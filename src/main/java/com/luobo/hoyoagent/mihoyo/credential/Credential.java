@@ -1,5 +1,7 @@
 package com.luobo.hoyoagent.mihoyo.credential;
 
+import com.luobo.hoyoagent.common.log.Mask;
+
 /**
  * 一个米游社账号的凭据。
  *
@@ -28,6 +30,11 @@ public record Credential(CookieJar cookies, String uid, String mid, String stoke
         return cookies.header();
     }
 
+    /** 有没有能真正发出去的 cookie；"空凭据"和"有 cookie 但没 token"是两种状态，调用方别自己判空串。 */
+    public boolean hasCookie() {
+        return cookies != null && !cookies.header().isBlank();
+    }
+
     public boolean hasStoken() {
         return stoken != null && !stoken.isBlank();
     }
@@ -36,9 +43,9 @@ public record Credential(CookieJar cookies, String uid, String mid, String stoke
         return cookies.has(cookieName);
     }
 
-    /** 给接口/日志回显用，只保留后 4 位。 */
+    /** 给接口/日志回显用，只保留后 4 位；mid 缺失时返回 null，让前端显示"—"而不是"***"。 */
     public String midMasked() {
-        return mask(mid);
+        return maskMid(mid);
     }
 
     public Credential withCookies(CookieJar fresh) {
@@ -48,7 +55,7 @@ public record Credential(CookieJar cookies, String uid, String mid, String stoke
     @Override
     public String toString() {
         return "Credential[uid=" + uid
-                + ", mid=" + mask(mid)
+                + ", mid=" + maskMid(mid)
                 + ", stoken=" + (hasStoken() ? "present" : "absent")
                 + ", cookies=" + (cookieHeader().isBlank() ? "none" : "***") + "]";
     }
@@ -63,10 +70,7 @@ public record Credential(CookieJar cookies, String uid, String mid, String stoke
         return null;
     }
 
-    private static String mask(String value) {
-        if (value == null || value.isBlank()) {
-            return null;
-        }
-        return value.length() <= 4 ? "***" : "***" + value.substring(value.length() - 4);
+    private static String maskMid(String value) {
+        return value == null || value.isBlank() ? null : Mask.tail(value, 4);
     }
 }

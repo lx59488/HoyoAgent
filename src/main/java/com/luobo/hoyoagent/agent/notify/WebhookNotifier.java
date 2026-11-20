@@ -1,5 +1,6 @@
 package com.luobo.hoyoagent.agent.notify;
 
+import com.luobo.hoyoagent.common.log.Mask;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
@@ -29,7 +30,7 @@ public class WebhookNotifier implements Notifier{
         this.props = props;
         this.mapper = mapper;
         if (props.enabled()) {
-            log.info("[NOTIFY] 已启用 kind={} url={}", props.kind(), mask(props.url()));
+            log.info("[NOTIFY] 已启用 kind={} url={}", props.kind(), Mask.prefix(props.url(), 12));
         } else {
             log.info("[NOTIFY] 未启用（hoyo.notify.enabled=false）");
         }
@@ -85,10 +86,6 @@ public class WebhookNotifier implements Notifier{
             }
         };
         return mapper.writeValueAsString(body);
-    }
-
-    private static String mask(String url) {
-        return url.length() <= 12 ? "***" : url.substring(0, 12) + "***";
     }
 
     private static String snippet(String body) {

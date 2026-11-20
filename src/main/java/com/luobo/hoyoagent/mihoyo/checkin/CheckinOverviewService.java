@@ -2,9 +2,7 @@ package com.luobo.hoyoagent.mihoyo.checkin;
 
 import com.luobo.hoyoagent.common.exception.BusinessException;
 import com.luobo.hoyoagent.mihoyo.checkin.dto.LunaInfo;
-import com.luobo.hoyoagent.mihoyo.credential.AccountService;
 import com.luobo.hoyoagent.mihoyo.credential.Credential;
-import com.luobo.hoyoagent.mihoyo.credential.CredentialProvider;
 import com.luobo.hoyoagent.mihoyo.dto.GameRole;
 import com.luobo.hoyoagent.mihoyo.role.GameRoleService;
 import com.luobo.hoyoagent.mihoyo.transport.MihoyoResult;
@@ -32,8 +30,6 @@ public class CheckinOverviewService {
 
     private final CheckinRecordStore records;
 
-    private final AccountService accounts;
-
     private final ObjectMapper mapper;
 
     private final ZoneId zone;
@@ -41,23 +37,14 @@ public class CheckinOverviewService {
     public CheckinOverviewService(GameRoleService roleService,
                                   LunaClient luna,
                                   CheckinRecordStore records,
-                                  AccountService accounts,
                                   ObjectMapper mapper,
                                   @Value("${hoyo.checkin.zone:Asia/Shanghai}") String zone) {
         this.roleService = roleService;
         this.luna = luna;
         this.records = records;
-        this.accounts = accounts;
         this.mapper = mapper;
         this.zone = ZoneId.of(zone);
     }
-
-    /** 临时桥：M1-c 之后由工具直接传 userId + 凭据。 */
-    public CheckinOverview overview() {
-        String userId = accounts.localUserId();
-        return overview(userId, accounts.find(userId).orElse(null));
-    }
-
 
     public CheckinOverview overview(String userId, Credential credential) {
         LocalDate today = LocalDate.now(zone);

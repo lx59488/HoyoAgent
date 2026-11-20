@@ -1,4 +1,4 @@
-package com.luobo.hoyoagent.mihoyo.record;
+package com.luobo.hoyoagent.mihoyo.gamerecord;
 
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;

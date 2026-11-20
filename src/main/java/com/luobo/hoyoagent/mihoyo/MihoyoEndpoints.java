@@ -1,7 +1,7 @@
 package com.luobo.hoyoagent.mihoyo;
 
 import com.luobo.hoyoagent.mihoyo.config.HoyoProperties;
-import com.luobo.hoyoagent.mihoyo.enums.MiyousheHost;
+import com.luobo.hoyoagent.mihoyo.enums.MihoyoHost;
 import org.springframework.stereotype.Component;
 
 import java.util.EnumMap;
@@ -11,17 +11,17 @@ import java.util.Map;
 public class MihoyoEndpoints {
 
     /** key = 枚举名小写，value = 覆盖用的 base url；不配就用默认值 */
-    private final Map<MiyousheHost, String> urls = new EnumMap<>(MiyousheHost.class);
+    private final Map<MihoyoHost, String> urls = new EnumMap<>(MihoyoHost.class);
 
     public MihoyoEndpoints(HoyoProperties props) {
         Map<String, String> overrides = props.hosts() == null ? Map.of() : props.hosts();
-        for (MiyousheHost h : MiyousheHost.values()) {
+        for (MihoyoHost h : MihoyoHost.values()) {
             String override = overrides.get(h.name().toLowerCase());
             urls.put(h, (override == null || override.isBlank()) ? h.defaultUrl() : override);
         }
     }
 
-    public String baseUrl(MiyousheHost host) {
+    public String baseUrl(MihoyoHost host) {
         return urls.get(host);
     }
 }

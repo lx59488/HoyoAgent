@@ -1,11 +1,8 @@
 package com.luobo.hoyoagent.adapter.http;
 
 import com.luobo.hoyoagent.agent.AgentChatService;
-import com.luobo.hoyoagent.agent.MihoyoAssistant;
-import com.luobo.hoyoagent.agent.memory.SessionMemoryStore;
-import com.luobo.hoyoagent.agent.observability.ToolCallRecorder;
 import com.luobo.hoyoagent.common.exception.ErrorCode;
-import com.luobo.hoyoagent.common.result.Result;
+import com.luobo.hoyoagent.common.result.ApiResult;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestParam;
@@ -37,7 +34,7 @@ public class AgentController {
      * </ul>
      */
     @GetMapping("/agent")
-    public Result<AgentAnswer> agent(
+    public ApiResult<AgentAnswer> agent(
             @RequestParam("q") String q,
             @RequestHeader(name = "X-Session-Id", required = false) String sessionId) {
 
@@ -45,9 +42,9 @@ public class AgentController {
         String id = oneShot ? ONE_SHOT_PREFIX + UUID.randomUUID() : sessionId.trim();
         try {
             AgentChatService.Answer answer = chat.ask(id, q);
-            return Result.success(new AgentAnswer(answer.reply(), answer.toolsCalled(), id, answer.messages()));
+            return ApiResult.success(new AgentAnswer(answer.reply(), answer.toolsCalled(), id, answer.messages()));
         } catch (Exception e) {
-            return Result.error(ErrorCode.INTERNAL_ERROR,
+            return ApiResult.error(ErrorCode.INTERNAL_ERROR,
                     e.getClass().getSimpleName() + ": " + e.getMessage());
         } finally {
             if (oneShot) {

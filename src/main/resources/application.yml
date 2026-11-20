@@ -14,7 +14,7 @@ langchain4j:
       log-responses: false
       timeout: PT60S
 
-# hosts 不配：默认值写在 MiyousheHost 枚举里，需要覆盖时才加
+# hosts 不配：默认值写在 MihoyoHost 枚举里，需要覆盖时才加（键名 = 枚举名小写：bbs/record/takumi/passport/nap）
 #   hosts:
 #     record: http://127.0.0.1:9999
 hoyo:

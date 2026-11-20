@@ -32,7 +32,7 @@ class LunaClientTest {
     AccountService accounts;
 
     private Credential credential() {
-        return accounts.require(accounts.localUserId());
+        return accounts.requireCredential(accounts.localUserId());
     }
 
     @Test

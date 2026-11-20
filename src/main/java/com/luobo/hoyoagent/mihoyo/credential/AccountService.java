@@ -2,6 +2,7 @@ package com.luobo.hoyoagent.mihoyo.credential;
 
 import com.luobo.hoyoagent.common.exception.BusinessException;
 import com.luobo.hoyoagent.common.exception.ErrorCode;
+import com.luobo.hoyoagent.common.log.Mask;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -14,7 +15,7 @@ import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
- * 按 userId 解析米游社凭据——多用户阶段的唯一入口。
+ * 按 userId 解析米游社凭据——全项目唯一的入口。
  *
  * <p>解析顺序：
  * <ol>
@@ -23,12 +24,15 @@ import java.util.concurrent.ConcurrentHashMap;
  *       这两个是单用户时代的产物，绝不能让别的 QQ 用户"继承"到你的账号。</li>
  * </ol>
  *
- * <p>本类只回答"谁 → 什么凭据"，不认识 openid、不碰 HTTP。
- * 身份从哪来由 {@code SessionRegistry} + {@code @ToolMemoryId} 决定。
+ * <p>本类只回答"谁 → 什么凭据"，外加"这份凭据从哪来"（{@link Source}，只给调试接口看）。
+ * 不认识 openid、不碰 HTTP；身份从哪来由 {@code SessionRegistry} + {@code @ToolMemoryId} 决定。
+ *
+ * <p>2026-11-20：删掉了 {@code CredentialProvider}。它和本类是同一件事的两份实现，各缓存一份：
+ * 扫码换绑写的是这里的缓存，而 {@code /api/auth/status} 读的是它启动时的快照，会报旧 uid。
+ * 现在来源信息并入 {@link Source}，写路径只剩 {@link #save}/{@link #claim} 一个。
  */
 @Service
 public class AccountService {
-
 
     private static final Logger log = LoggerFactory.getLogger(AccountService.class);
 
@@ -40,8 +44,8 @@ public class AccountService {
 
     private final Credential envCredential;
 
-    private final Map<String, Credential> cache = new ConcurrentHashMap<>();
-
+    /** 命中过的解析结果；"没找到"不落缓存，否则解绑后还会命中旧结果。 */
+    private final Map<String, Resolved> cache = new ConcurrentHashMap<>();
 
     public AccountService(AccountStore store,
                           LegacyCredentialFile legacyFile,
@@ -52,50 +56,53 @@ public class AccountService {
         this.localUserId = localUserId == null || localUserId.isBlank() ? "local" : localUserId.trim();
         this.envCredential = Credential.of(rawCookie == null ? "" : rawCookie);
         log.info("账号服务就绪：local={} env={}", this.localUserId,
-                present(envCredential) ? "present" : "absent");
+                envCredential.hasCookie() ? "present" : "absent");
+    }
+
+    /** 凭据是从哪儿解析出来的。调试页要能回答"为什么用的是这个号"。 */
+    public enum Source {
+        /** 账号目录里的 {@code .account} 文件 */
+        ACCOUNT,
+        /** 旧 {@code ~/.hoyo/credential.properties}（只读兜底，仅 local） */
+        LEGACY,
+        /** {@code .env} 的 {@code HOYO_COOKIE}（仅 local） */
+        ENV,
+        /** 没有 */
+        NONE
     }
 
     public String localUserId() {
         return localUserId;
     }
 
-    /** 查不到返回 empty；不缓存"没有"，否则解绑后还会命中旧结果。 */
-    public Optional<Credential> find(String userId) {
+    /** 查不到返回 empty。 */
+    public Optional<Credential> credentialOf(String userId) {
         if (userId == null || userId.isBlank()) {
             return Optional.empty();
         }
-        return Optional.ofNullable(cache.computeIfAbsent(userId, this::resolve));
+        return Optional.ofNullable(resolveCached(userId).credential());
     }
 
-    private Credential resolve(String userId) {
-        Account stored = store.find(userId).orElse(null);
-        if (stored != null && present(stored.credential())) {
-            return stored.credential();
+    /** 调试用：这份凭据的来源。没绑定时返回 {@link Source#NONE}。 */
+    public Source sourceOf(String userId) {
+        if (userId == null || userId.isBlank()) {
+            return Source.NONE;
         }
-        if (userId.equals(localUserId)) {
-            Credential legacy = legacyFile.read().orElse(null);
-            if (present(legacy)) {
-                return legacy;
-            }
-            if (present(envCredential)) {
-                return envCredential;
-            }
-        }
-        return stored == null ? null : stored.credential();
-    }
-
-    public boolean isBound(String userId) {
-        return find(userId).filter(AccountService::present).isPresent();
+        return resolveCached(userId).source();
     }
 
     /** 工具层的入口：没凭据就抛，文案是给用户直接看的。 */
-    public Credential require(String userId) {
-        Credential credential = find(userId).orElse(null);
-        if (!present(credential)) {
+    public Credential requireCredential(String userId) {
+        Credential credential = credentialOf(userId).orElse(null);
+        if (credential == null || !credential.hasCookie()) {
             throw new BusinessException(ErrorCode.MOYO_AUTH_EXPIRED,
                     "你还没绑定米游社账号，回复「绑定」获取二维码");
         }
         return credential;
+    }
+
+    public boolean isBound(String userId) {
+        return credentialOf(userId).filter(Credential::hasCookie).isPresent();
     }
 
     public void save(String userId, Credential fresh) {
@@ -103,8 +110,8 @@ public class AccountService {
             throw new IllegalArgumentException("userId 不能为空");
         }
         store.save(new Account(userId, fresh, Instant.now()));
-        cache.put(userId, fresh);
-        log.info("账号已保存：user={} uid={}", mask(userId), fresh.uid());
+        cache.put(userId, new Resolved(fresh, Source.ACCOUNT));
+        log.info("账号已保存：user={} uid={}", Mask.id(userId), fresh.uid());
     }
 
     public boolean delete(String userId) {
@@ -114,7 +121,7 @@ public class AccountService {
         boolean removed = store.delete(userId);
         cache.remove(userId);
         if (removed) {
-            log.info("账号已删除：user={}", mask(userId));
+            log.info("账号已删除：user={}", Mask.id(userId));
         }
         return removed;
     }
@@ -132,19 +139,35 @@ public class AccountService {
         return store.list().stream().filter(a -> uid.equals(a.uid())).findFirst();
     }
 
-    private static boolean present(Credential credential) {
-        return credential != null
-                && credential.cookieHeader() != null
-                && !credential.cookieHeader().isBlank();
+    private Resolved resolveCached(String userId) {
+        Resolved cached = cache.get(userId);
+        if (cached != null) {
+            return cached;
+        }
+        Resolved fresh = resolve(userId);
+        if (fresh.credential() != null) {
+            cache.put(userId, fresh);   // 并发下重复解析无害：两边得到的是同一份
+        }
+        return fresh;
     }
 
-    private static String mask(String userId) {
-        if (userId == null || userId.isBlank()) {
-            return "***";
+    private Resolved resolve(String userId) {
+        Account stored = store.find(userId).orElse(null);
+        if (stored != null && stored.credential().hasCookie()) {
+            return new Resolved(stored.credential(), Source.ACCOUNT);
         }
-        return userId.length() <= 8
-                ? "***"
-                : userId.substring(0, 4) + "***" + userId.substring(userId.length() - 4);
+        if (userId.equals(localUserId)) {
+            Credential legacy = legacyFile.read().orElse(null);
+            if (legacy != null && legacy.hasCookie()) {
+                return new Resolved(legacy, Source.LEGACY);
+            }
+            if (envCredential.hasCookie()) {
+                return new Resolved(envCredential, Source.ENV);
+            }
+        }
+        return stored == null
+                ? new Resolved(null, Source.NONE)
+                : new Resolved(stored.credential(), Source.ACCOUNT);
     }
 
     /**
@@ -166,5 +189,6 @@ public class AccountService {
         save(userId, fresh);
     }
 
-
+    private record Resolved(Credential credential, Source source) {
+    }
 }

@@ -4,9 +4,8 @@
 > 用法：从上往下做，每完成一条把 `[ ]` 改成 `[x]`。每个阶段结束后打一个 git tag（`phase-1`、`phase-2`…）。
 > 设计原则：**先用假数据学 Agent，再接真实 API**。两条线并行、互不阻塞。
 
-**最后更新：2026-11-18**（P7 会话层已落地；P9 的 3 天观察仍是 **0/3**，11-16 签到 `AUTH` 失效、
-续期机制待验；QQ 主线从 P10（OneBot）切到 **P11（官方机器人）**：`adapter/qq` 已落地、
-`AgentChatService` 已抽、签到结果接上 `Notifier`、切片抽成 `TextChunker`；**仍未真机实跑**）
+**最后更新：2026-11-20**（结构收口：删 `CredentialProvider`、`hoyo.hosts` 覆盖签到、命名统一，
+见文末维护记录；P9 的 3 天观察仍是 **0/3**；QQ 主线 P11 已落地但**未真机验收**）
 
 ---
 
@@ -35,95 +34,39 @@
 
 ## 当前代码结构
 
+> 2026-11-20 起不再维护逐文件树：它必然落后于代码（上一版还写着 `MessageWindowChatMemory`、
+> `CredentialProvider`、25 个测试文件）。这里只保留**包边界约定**；具体文件用 IDE 看，
+> 结构性的变更写进文末「维护记录」。
+
 ```
 com.luobo.hoyoagent
-├── HoyoAgentApplication.java          ← @ConfigurationPropertiesScan 已开启
-├── common/                            ← 横切：统一响应 / 异常 / 日志脱敏
-│   ├── constant/CommonConstants.java
-│   ├── exception/{BusinessException, ErrorCode, GlobalExceptionHandler}.java
-│   ├── log/ErrorLogSanitizer.java
-│   └── result/Result.java
-├── adapter/                           ← 只表示「入站」：把外部协议翻译成 AgentChatService 调用
-│   ├── http/
-│   │   ├── ChatController.java        ← P1：纯模型问答（对照组，不挂工具也不挂记忆）
-│   │   ├── AgentController.java       ← P2/P7：走 AiService，X-Session-Id 定会话，回传 toolsCalled
-│   │   ├── AuthController.java        ← P9：扫码登录 + 绑定角色 + v2 刷新
-│   │   ├── MemoryController.java      ← P7：GET/DELETE /api/memory/{sessionId}（唯一观测口）
-│   │   └── CheckinController.java     ← P9：POST /api/checkin
-│   └── qq/                            ← P11：QQ 官方机器人（入站 + 被动回复）
-│       ├── QqBotGateway.java          ← WS 网关：identify / 心跳 / 重连（只管协议）
-│       ├── QqBotDispatcher.java       ← 事件 → 白名单 → 去重 → Agent → 切片 → 回复
-│       ├── QqBotApi.java              ← access_token 刷新 + POST /v2/users/{openid}/messages
-│       ├── QqBotProperties.java       ← qq.*：凭据 / 白名单（openid）/ 切片上限
-│       └── QqBotConfig.java           ← HttpClient（显式命名，避免多平台时按类型注入歧义）
-├── channel/                           ← 平台无关的会话管道（接第二个平台前的落点）
-│   └── TextChunker.java               ← 切片：换行优先 / 超长硬切 / 最多 N 段 / 不劈 emoji
-├── agent/
-│   ├── AgentChatService.java          ← 入口共用：ask / evict（http 与 qq 同一套）
-│   ├── MihoyoAssistant.java           ← @AiService 接口（无实现，运行时动态代理）；extends ChatMemoryAccess
-│   ├── notify/                        ← 出站通知：Notification / Notifier / WebhookNotifier（签到结果）
-│   ├── memory/                        ← P7：会话记忆（唯一状态在这里）
-│   │   ├── MemoryProperties.java      ← hoyo.memory.*；null / 非法值落默认值
-│   │   ├── SessionMemoryStore.java    ← ChatMemoryStore 实现：会话数上限 + 空闲 TTL + expired()
-│   │   └── MemoryConfig.java          ← ChatMemoryProvider（MessageWindowChatMemory，窗口 20 条）
-│   ├── observability/ToolCallRecorder.java
-│   └── tool/
-│       ├── CheckinTool.java           ← P9：每日签到（无身份参数）
-│       └── DecoyTool.java             ← @Profile("decoy") 诱饵，只用于测能力边界
-└── mihoyo/                            ← 外部系统客户端（与 agent 完全解耦）
-    ├── transport/                     ← 唯一 HTTP 管道（P9 重构）
-    │   ├── MihoyoHttp.java            ← 无状态：retcode / headers 都返回，不抛业务异常
-    │   ├── MihoyoRequest.java         ← 不可变请求（null 集合自动规整为空）
-    │   ├── MihoyoResult.java          ← record(retcode, message, data, headers)
-    │   ├── HeaderProfile.java         ← 一套头 = 一个值（salt 与版本锁在一起）
-    │   └── Profiles.java              ← 扫码 / 换票 / 签到 / 战绩 四套头
-    ├── error/MihoyoError.java         ← retcode 唯一映射：kind + 中文文案 + ErrorCode
-    ├── credential/                    ← AccountStore(File) / CookieJar / Credential / Provider（旧文件只读兜底）
-    ├── auth/                          ← QrLoginService + passport/{PassportClient,PassportDevice}
-    ├── record/RecordClient.java       ← 绑定角色 / App 配置（character/list 已删除）
-    ├── checkin/                       ← CheckinGame / LunaClient / CheckinService
-    │   ├── CheckinScheduler.java      ← P9-8：00:10 定时 + 启动补签 + 当日幂等 + [CHECKIN][ALERT]
-    │   ├── CheckinRecord.java         ← 一次运行的快照（DONE / PARTIAL / FAILED / SKIPPED）
-    │   └── CheckinRecordStore.java    ← ~/.hoyo/checkin/YYYY-MM-DD.json，原子写、读坏当没有
-    ├── role/GameRoleService.java      ← 角色自动发现（10 分钟缓存）
-    ├── client/DeviceIdProvider.java   ← 持久化 device_id（配置 > ~/.hoyo/device-id > 生成）
-    ├── dto/GameRole.java              ← 绑定角色
-    ├── enums/{MiyousheHost,GameBiz}   ← host 与 game_biz 常量
-    ├── MihoyoEndpoints.java           ← host 覆盖入口（hoyo.hosts 可改 base url）
-    ├── sign/DsSigner.java             ← DS1 / DS2 公式与 md5（唯一签名入口）
-    └── config/HoyoProperties.java     ← @ConfigurationProperties(prefix = "hoyo")
-
-src/test/java/...（25 个文件，覆盖 agent / channel / mihoyo；**adapter 仍未覆盖**）
-├── channel/TextChunkerTest.java           ← 切片：超长单行硬切 / 撞上限截断 / 不劈 emoji
-├── agent/memory/*                         ← 会话数上限 / 空闲 TTL / 落盘 / 配置兜底
-├── agent/tool/DecoyProfileTest.java       ← 诱饵 profile 的能力边界
-├── mihoyo/checkin/*                       ← 签到判定 / 记录落盘 / 通知文案 / Luna 客户端
-├── mihoyo/transport/*                     ← MockWebServer：retcode / header / POST 语义
-├── mihoyo/sign/DsSignerTest.java          ← 锁 DS 公式
-├── mihoyo/credential/*                    ← CookieJar / AccountStore / CredentialProvider
-└── mihoyo/auth/passport/*                 ← 扫码 / v2 换票
-
-src/main/resources/static/               ← 调试页（零构建、无 CDN）
-├── index.html                           ← 扫码绑定 + 对话 + 调试面板 + 新会话
-├── style.css
-└── app.js                               ← sessionId 存 localStorage，/agent 带 X-Session-Id
-
-scripts/smoke-agent.ps1                ← 冒烟脚本（8 条用例，2026-11-07 重写；每条用例一个独立会话）
-scripts/smoke-memory.ps1               ← P7：记忆差分验收（同会话不重复调 / 无会话必调 / 跨会话隔离 / 窗口不涨）
-scripts/login-qr.ps1                   ← P9：建码 → 存 PNG → 轮询到 BOUND
-scripts/round1.md / round2.md          ← P3 两轮原始输出（历史证据，只读）
-scripts/round3.md / round3-decoy.md    ← 新契约下两种 profile 的实测结果（均 8/8）
-.env.example                           ← 配置模板；真实值只写 .env（已 gitignore）
-docs/ROADMAP.md                        ← 本文件
-docs/mihoyo-auth.md                    ← 登录/多用户设计稿；A/B 已落地（P9）
-docs/qq-inbound.md                     ← QQ 入站现状（官方机器人实现 / 配置 / 排障 / 下一步）
+├── adapter/   入站：http（调试页 / API）、qq（官方机器人 WS 网关 + 被动回复）
+├── agent/     Agent 层：AiService、工具、记忆、通知、观测；依赖 mihoyo，不反向
+├── channel/   平台无关的会话管道：切片（TextChunker）、会话→用户映射（SessionRegistry）
+├── common/    横切：统一响应信封（ApiResult）、错误码、异常处理、日志脱敏（Mask）
+└── mihoyo/    出站：米游社客户端
+    ├── transport/   唯一 HTTP 管道 + 请求头套装（salt/版本锁在一起）
+    ├── credential/  Account / Credential / CookieJar；AccountService 是凭据唯一入口
+    ├── auth/        扫码登录（passport） · checkin/ 签到 · binding/ 绑定编排
+    ├── gamerecord/  战绩/角色接口 · role/ 角色缓存 · client/ device_id
+    ├── error/       retcode → ErrorKind 映射 · sign/ DS 签名 · enums/ host
+    └── config/      HoyoProperties（hoyo.*）+ MihoyoEndpoints（host 覆盖）
 ```
+
+**三条边界**（改代码前先确认自己在哪一边）：
+
+1. `adapter` 只表示**入站**，`mihoyo` 表示**出站**，`channel` 只放**平台无关**的会话管道。
+2. `mihoyo` 不依赖 `agent` / `adapter`；`agent` 可以依赖 `mihoyo`。
+3. 凭据只有一个入口 `AccountService`：工具和控制器都从它拿，不自己读文件、不自己读 `.env`。
+   （2026-11-20 删掉 `CredentialProvider` 后，写路径也只剩 `save`/`claim` 一个。）
+
+测试与脚本、前端调试页仍在原来的位置，不再逐条罗列。
 
 接口：`GET /`（调试页：扫码绑定 + 会话对话）、`GET /chat?q=`（纯问答，对照组：无工具、无记忆）、
 `GET /agent?q=` + **请求头 `X-Session-Id`**（带工具，返回 `{code, message, data:{reply, toolsCalled, sessionId, messages}}`；
 不传头 = 一次性会话，请求结束即销毁，行为与加记忆之前一致）、
 `POST /api/auth/qr` + `GET /api/auth/qr/{ticket}`（扫码绑定）、`GET /api/auth/status`（绑定状态）、
-`POST /api/checkin`（裸调签到，不落盘）、`POST /api/checkin/run`（走调度路径，今天已签则跳过）、
+`POST /api/checkin`（裸调签到，只签 local 账号、不落盘）、`POST /api/checkin/run`（走调度路径，今天已签则跳过）、
 `GET /api/checkin/status`（今日结果 + 最近 7 天 + 是否该看一眼）、
 `GET /api/memory/{sessionId}`（窗口内容 + `expired` 标记）、`DELETE /api/memory/{sessionId}`（清空会话）
 
@@ -872,6 +815,22 @@ java -jar target\HoyoAgent-0.0.1-SNAPSHOT.jar "--spring.config.import=optional:f
     TTL 的单位应该是"轮"而不是"秒"
 
 **维护记录**
+
+- 2026-11-20 结构收口（除 source 字段取值外无行为变更；132 条测试全绿）：
+  1) 删 `CredentialProvider`：它和 `AccountService` 各缓存一份凭据，扫码换绑后
+     `GET /api/auth/status` 还会报启动时的旧快照。来源信息并入 `AccountService.Source`
+     （`ACCOUNT/LEGACY/ENV/NONE`），该接口 `source` 字段的取值随之变化（原来是 `store/legacy/env`）。
+  2) `hoyo.hosts` 对签到生效：`CheckinGame` 不再硬编码 baseUrl，改成 `MihoyoHost` 枚举 +
+     `MihoyoEndpoints`，并补 `NAP` host（`act-nap-api`）。此前配了覆盖，签到仍会绕过配置打真网。
+  3) 命名：`Result`→`ApiResult`、`MemoryPersistence`→`MemoryStore`（+`FileMemoryStore`）、
+     `CheckinService.Summary`→`CheckinRunResult`、`RoleResult`→`CheckinRoleResult`（独立文件，
+     切断 `CheckinRecord` 对 Service 嵌套类型的依赖）、`mihoyo.record`→`mihoyo.gamerecord`、
+     `sendC2c`→`sendC2C`、`MiyousheHost`→`MihoyoHost`。
+  4) 清理：空包 `adapter/onebot`、`config`；零引用枚举 `GameBiz`；`ErrorCode` 的知识库 6xxx、
+     限流 8xxx；`GlobalExceptionHandler` 里 RestTemplate / 文件上传三组永不命中的分支；
+     14 处未使用 import；两个自称"临时桥"的无参重载。
+  5) 脱敏收口：9 份 `mask()` 合并为 `common/log/Mask`（`id` / `tail` / `prefix` 三种规则），
+     长度 ≤ 8 的 id 一律整串隐掉。
 
 - 2026-11-12 清理：删除 `Signer`（DS 逻辑已由 `DsSigner` 统一）、`hoyo.salt` / `hoyo.role-id` / `hoyo.server`
   三个死配置、Spring 初始化模板 `HELP.md`；修复 `ErrorCode` 里 `MOYO_SIGN_INVALID` 与 `MOYO_DATA_PRIVATE`
