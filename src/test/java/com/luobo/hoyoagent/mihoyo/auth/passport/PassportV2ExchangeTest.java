@@ -51,7 +51,7 @@ class PassportV2ExchangeTest {
                 mapper,
                 new MihoyoEndpoints(props),
                 new PassportDevice(tempDir.resolve("passport-device")),
-                new DeviceIdProvider(props));
+                new DeviceIdProvider(props, tempDir.resolve("state").toString()));
     }
 
     @AfterEach

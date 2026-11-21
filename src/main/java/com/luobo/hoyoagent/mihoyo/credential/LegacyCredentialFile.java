@@ -1,7 +1,10 @@
 package com.luobo.hoyoagent.mihoyo.credential;
 
+import com.luobo.hoyoagent.common.storage.LocalFileStore;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
 import java.io.IOException;
@@ -24,10 +27,13 @@ public class LegacyCredentialFile {
     private static final Path DEFAULT_FILE =
             Path.of(System.getProperty("user.home"), ".hoyo", "credential.properties");
 
+    private static final String FILE_NAME = "credential.properties";
+
     private final Path file;
 
-    public LegacyCredentialFile() {
-        this(DEFAULT_FILE);
+    @Autowired
+    public LegacyCredentialFile(@Value("${hoyo.state-dir:}") String stateDir) {
+        this(LocalFileStore.stateRoot(stateDir).resolve(FILE_NAME));
     }
 
     LegacyCredentialFile(Path file) {

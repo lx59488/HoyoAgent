@@ -1,15 +1,16 @@
 package com.luobo.hoyoagent.mihoyo.auth.passport;
 
+import com.luobo.hoyoagent.common.storage.LocalFileStore;
 import com.luobo.hoyoagent.mihoyo.sign.DsSigner;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
 import java.io.IOException;
-import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.StandardCopyOption;
 import java.security.SecureRandom;
 import java.time.Instant;
 import java.util.HexFormat;
@@ -31,11 +32,18 @@ public class PassportDevice {
 
     private static final Path DEFAULT_FILE = Path.of(System.getProperty("user.home"), ".hoyo", "passport-device");
 
+    private static final String FILE_NAME = "passport-device";
+
     private static final SecureRandom RANDOM = new SecureRandom();
 
     private final String deviceId;
 
     private final String deviceFp;
+
+    @Autowired
+    public PassportDevice(@Value("${hoyo.state-dir:}") String stateDir) {
+        this(LocalFileStore.stateRoot(stateDir).resolve(FILE_NAME));
+    }
 
     public PassportDevice() {
         this(DEFAULT_FILE);
@@ -61,7 +69,7 @@ public class PassportDevice {
     private static Identity loadOrCreate(Path file) {
         try {
             if (Files.exists(file)) {
-                List<String> lines = Files.readAllLines(file, StandardCharsets.UTF_8);
+                List<String> lines = LocalFileStore.readString(file).lines().toList();
                 String id = valueOf(lines, "device_id");
                 String fp = valueOf(lines, "device_fp");
                 if (id != null && id.matches("[0-9A-F]{16}") && fp != null && fp.matches("[0-9a-f]{32}")) {
@@ -109,17 +117,10 @@ public class PassportDevice {
     }
 
     private static void write(Path file, Identity identity) throws IOException {
-        Files.createDirectories(file.getParent());
         String content = "device_id=" + identity.deviceId()
                 + "\ndevice_fp=" + identity.deviceFp()
                 + "\ncreated_at=" + Instant.now()
                 + "\n";
-        Path tmp = file.resolveSibling(file.getFileName() + ".tmp");
-        Files.writeString(tmp, content, StandardCharsets.UTF_8);
-        try {
-            Files.move(tmp, file, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
-        } catch (IOException e) {
-            Files.move(tmp, file, StandardCopyOption.REPLACE_EXISTING);
-        }
+        LocalFileStore.writeAtomic(file, content);
     }
 }

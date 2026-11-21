@@ -39,6 +39,12 @@ public record CheckinRecord(String userId,
         return outcome == Outcome.PARTIAL || outcome == Outcome.FAILED;
     }
 
+    /** 调试用：把记录压成一行，日志和状态页共用同一套措辞。 */
+    public String describe() {
+        return "%s %s（%s）：%s".formatted(date, outcome, trigger,
+                java.util.Objects.toString(message, ""));
+    }
+
     public enum Trigger {
         /** 每天 00:10 的 cron */
         SCHEDULED,

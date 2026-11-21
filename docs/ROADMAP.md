@@ -4,8 +4,9 @@
 > 用法：从上往下做，每完成一条把 `[ ]` 改成 `[x]`。每个阶段结束后打一个 git tag（`phase-1`、`phase-2`…）。
 > 设计原则：**先用假数据学 Agent，再接真实 API**。两条线并行、互不阻塞。
 
-**最后更新：2026-11-20**（结构收口：删 `CredentialProvider`、`hoyo.hosts` 覆盖签到、命名统一，
-见文末维护记录；P9 的 3 天观察仍是 **0/3**；QQ 主线 P11 已落地但**未真机验收**）
+**最后更新：2026-11-21**（持久化收口：新增 `LocalFileStore`、`hoyo.state-dir` 统一状态根、
+`CheckinRecordStore` 接口化，见文末维护记录；P9 的 3 天观察仍是 **0/3**；
+QQ 主线 P11 已落地但**未真机验收**）
 
 ---
 
@@ -43,7 +44,8 @@ com.luobo.hoyoagent
 ├── adapter/   入站：http（调试页 / API）、qq（官方机器人 WS 网关 + 被动回复）
 ├── agent/     Agent 层：AiService、工具、记忆、通知、观测；依赖 mihoyo，不反向
 ├── channel/   平台无关的会话管道：切片（TextChunker）、会话→用户映射（SessionRegistry）
-├── common/    横切：统一响应信封（ApiResult）、错误码、异常处理、日志脱敏（Mask）
+├── common/    横切：统一响应信封（ApiResult）、错误码、异常处理、日志脱敏（Mask）、
+│              本地存储基座（storage/LocalFileStore：目录解析 + 原子写 + 哈希文件名）
 └── mihoyo/    出站：米游社客户端
     ├── transport/   唯一 HTTP 管道 + 请求头套装（salt/版本锁在一起）
     ├── credential/  Account / Credential / CookieJar；AccountService 是凭据唯一入口
@@ -426,7 +428,9 @@ P6-3 的真实角色输出保留为历史证据；「自然语言 → 真实数�
 
 **常见坑**
 
-- memory 在内存里，重启就丢——先接受，别急着上 Redis
+- memory 是两层：RAM 里的会话（`SessionMemoryStore`，会话数上限 + 空闲 TTL）和落盘的 JSON
+  （`FileMemoryStore`，`~/.hoyo/memory/`，30 天保留）。**重启不丢**——所以"别急着上 Redis"仍然成立，
+  但要先分清疼的是"进程内淘汰"还是"多副本共享"，两者解法完全不同
 - 窗口太大 = 每次都烧钱；太小 = 模型失忆。20 条约等于 4~5 轮带工具的对话（一次工具调用占 3~4 条）
 - 会话 id 是**适配器**产出的，Agent 不解析也不信任。将来 onebot 接入时 id 会含 QQ 号，所以日志一律走 `mask()`
 - **不传会话 id ≠ "给个 default 会话"**：后者会让所有匿名调用串进同一个对话，也会让冒烟用例互相污染
@@ -442,8 +446,10 @@ P6-3 的真实角色输出保留为历史证据；「自然语言 → 真实数�
 
 ## P8 · 工程化与扩展（选做）
 
-- [ ] 多账号：`AccountStore` 已就位（每用户一个 `.account` 文件），还差
-  `@ToolMemoryId → userId → 凭据` 的解析与存储加密
+- [ ] 多账号：三个存储边界都已就位（`AccountStore` 每用户一个 `.account` 文件、
+  `CheckinRecordStore` 每人一个记录目录、`MemoryStore` 每会话一个 JSON），还差
+  `@ToolMemoryId → userId → 凭据` 的解析与存储加密。存储根已统一到 `hoyo.state-dir`，
+  实现由 `hoyo.storage.backend` 选择（目前只有 `file`，见 2026-11-21 维护记录）
 - [ ] 重试与降级：限流类指数退避，登录类不重试
 - [ ] 可观测：Micrometer 打点，替换掉 `ToolCallRecorder`
 - [ ] 测试：录制一次真实响应存 JSON，回放跑工具测试（不依赖网络）
@@ -533,8 +539,10 @@ Invoke-RestMethod "http://localhost:8080/api/checkin/run?force=true" -Method Pos
 **两条容错约定**（都有单测锁住）：读坏的文件当"没有记录"（宁可多签一次，服务端幂等兜底），
 写失败只打日志（记录是观测，不是业务结果）。
 
-**已知边界**：单用户——文件名只有日期，`userId` 写在文件里，换账号时会覆盖上一个人的记录；
-多用户时按 `userId` 分目录或直接上库，`CheckinScheduler` 不用改。
+**已知边界**：已按 `userId` 分目录（`checkin/<sha256(userId)[0:16]>/<date>.json`），多账号互不覆盖，
+解绑时 `deleteAll(userId)` 删整目录。**"上库时 `CheckinScheduler` 不用改"这句话以前是假的**：
+它当时用 `records.root()` 打日志，而 `root()` 给不出数据库的路径；
+2026-11-21 把 `root()` 换成 `location()` 并把 store 抽成接口之后，这句话才成立。
 
 ---
 
@@ -815,6 +823,30 @@ java -jar target\HoyoAgent-0.0.1-SNAPSHOT.jar "--spring.config.import=optional:f
     TTL 的单位应该是"轮"而不是"秒"
 
 **维护记录**
+
+- 2026-11-21 持久化收口（无行为变更；132 条测试全绿）：
+  1) 新增 `common/storage/LocalFileStore`：**原子写 4 份、sha256 文件名 3 份、默认根目录 6 处硬编码、
+     列目录 4 处**，全部收成一处。六个文件只声明"根在哪"：`FileAccountStore` / `FileMemoryStore` /
+     `FileCheckinRecordStore` / `DeviceIdProvider` / `PassportDevice` / `LegacyCredentialFile`。
+     顺带修掉 `FileMemoryStore.save` 的一个隐患：`fileOf(sessionId)` 原本在 `try` 里，空 sessionId
+     时 `catch` 里再抛一次，日志打不出来反而炸。
+  2) `hoyo.state-dir` 统一状态根（默认 `~/.hoyo`）：此前 `device-id` / `passport-device` /
+     `credential.properties` 三个路径**彻底写死**，换目录必须改代码。现在一个配置整体搬家，
+     子目录仍可用 `hoyo.account-dir` / `hoyo.checkin.dir` / `hoyo.memory.dir` 单独覆盖。
+  3) `CheckinRecordStore` 抽成接口，实现改名 `FileCheckinRecordStore`；契约里删掉 `Path root()`，
+     换成 `String location()`——数据库实现给不出路径，留着它等于逼未来实现编一个假路径。
+     静态 `CheckinRecordStore.describe()` 移到 `CheckinRecord.describe()`。
+     调用方改动只有 `CheckinScheduler` 两行（日志里的 `root()`→`location()`、`describe()` 变成实例方法），
+     `CheckinOverviewService` / `BindingService` **一行没改**。
+  4) `@ConditionalOnProperty(hoyo.storage.backend=file)` 加到三个 file 实现上：以后加
+     `Jdbc*Store` 是"加一个类 + 改一行配置"，不是"改 6 个文件 + 动 4 个调用点"。
+     注意删掉 `file` 实现时**没有替代 bean 会启动失败**，这是刻意的：宁可起不来，不要静默不落盘。
+  5) 配置补漏：`hoyo.memory.dir` / `hoyo.memory.retention` 代码一直在读、yml 里却看不见，已补上。
+  6) 实测验证：`HOYO_STATE_DIR=target/state-check` 起一次 `@SpringBootTest`，日志里
+     `记录目录=...\target\state-check\checkin`、`passport-device` 也落在该目录 → 搬迁确实生效。
+  7) 仍然**故意没做**：`SessionRegistry` / `QqBotDispatcher.seen` / `QrLoginService.sessions`
+     保持纯内存。它们的抽象方向取决于"要不要多副本"，现在设计基本一定猜错；
+     等真要上多副本时，那是一次架构决策（外置会话 / 分布式锁），不是加几个 interface。
 
 - 2026-11-20 结构收口（除 source 字段取值外无行为变更；132 条测试全绿）：
   1) 删 `CredentialProvider`：它和 `AccountService` 各缓存一份凭据，扫码换绑后

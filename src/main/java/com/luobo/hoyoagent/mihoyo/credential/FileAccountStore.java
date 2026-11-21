@@ -1,28 +1,22 @@
 package com.luobo.hoyoagent.mihoyo.credential;
 
+import com.luobo.hoyoagent.common.storage.LocalFileStore;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
 
 import java.io.IOException;
-import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.StandardCopyOption;
-import java.nio.file.attribute.PosixFilePermissions;
-import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Comparator;
-import java.util.HexFormat;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
-import java.util.stream.Stream;
-
 /**
  * 每用户一个文件的 {@link AccountStore}。
  *
@@ -40,28 +34,27 @@ import java.util.stream.Stream;
  * {@code CredentialCipher}（AES-256-GCM），不影响本类结构。
  */
 @Component
+@ConditionalOnProperty(name = "hoyo.storage.backend", havingValue = "file", matchIfMissing = true)
 public class FileAccountStore implements AccountStore {
-
     private static final Logger log = LoggerFactory.getLogger(FileAccountStore.class);
-
     private static final String VERSION = "1";
-
     private static final String SUFFIX = ".account";
-
-    private final Path root;
-
+    private final LocalFileStore store;
     /** 单进程内串行化写；跨进程靠文件锁/数据库，当前不做 */
     private final Object writeLock = new Object();
 
     @Autowired
-    public FileAccountStore(@Value("${hoyo.account-dir:}") String directory) {
-        this(directory == null || directory.isBlank()
-                ? Path.of(System.getProperty("user.home"), ".hoyo", "accounts")
-                : Path.of(directory));
+    public FileAccountStore(@Value("${hoyo.account-dir:}") String directory,
+                            @Value("${hoyo.state-dir:}") String stateDir) {
+        this(LocalFileStore.resolve(directory, LocalFileStore.stateRoot(stateDir).resolve("accounts")));
     }
 
     FileAccountStore(Path root) {
-        this.root = root;
+        this(LocalFileStore.at(root));
+    }
+
+    private FileAccountStore(LocalFileStore store) {
+        this.store = store;
     }
 
     @Override
@@ -84,12 +77,7 @@ public class FileAccountStore implements AccountStore {
         requireUserId(account.userId());
         synchronized (writeLock) {
             try {
-                Files.createDirectories(root);
-                Path target = fileOf(account.userId());
-                Path temp = target.resolveSibling(target.getFileName() + ".tmp");
-                Files.writeString(temp, serialize(account), StandardCharsets.UTF_8);
-                restrictPermissions(temp);
-                move(temp, target);
+                LocalFileStore.writeAtomicSecret(fileOf(account.userId()), serialize(account));
                 log.info("账号已保存: user={} uid={}", account.userId(), account.uid());
             } catch (IOException e) {
                 // 和旧 CredentialStore 一致：写盘失败不让"已经登录成功"变成异常，内存里仍可用
@@ -113,12 +101,9 @@ public class FileAccountStore implements AccountStore {
 
     @Override
     public List<Account> list() {
-        if (!Files.isDirectory(root)) {
-            return List.of();
-        }
         List<Account> accounts = new ArrayList<>();
-        try (Stream<Path> files = Files.list(root)) {
-            files.filter(p -> p.getFileName().toString().endsWith(SUFFIX))
+        try {
+            LocalFileStore.listFiles(store.root(), SUFFIX).stream()
                     .sorted(Comparator.comparing(p -> p.getFileName().toString()))
                     .forEach(p -> read(p).ifPresent(accounts::add));
         } catch (IOException e) {
@@ -164,20 +149,13 @@ public class FileAccountStore implements AccountStore {
         sb.append("updated_at=").append(account.updatedAt() == null ? Instant.now() : account.updatedAt()).append('\n');
         return sb.toString();
     }
-
     private Path fileOf(String userId) {
-        return root.resolve(fileNameOf(userId));
+        return store.fileOf(userId, 16, SUFFIX);
     }
 
-    /** 文件名用 userId 的哈希，避免把平台账号泄露在文件系统里。 */
+    /** 文件名用 userId 的哈希，避免把平台账号泄露在文件系统里（单测直接断言这个）。 */
     static String fileNameOf(String userId) {
-        try {
-            byte[] digest = MessageDigest.getInstance("SHA-256")
-                    .digest(userId.getBytes(StandardCharsets.UTF_8));
-            return HexFormat.of().formatHex(digest).substring(0, 16) + SUFFIX;
-        } catch (NoSuchAlgorithmException e) {
-            throw new IllegalStateException(e);
-        }
+        return LocalFileStore.hashedName(userId, 16, SUFFIX);
     }
 
     private static Instant parseInstant(String value) {
@@ -191,22 +169,6 @@ public class FileAccountStore implements AccountStore {
     private static void requireUserId(String userId) {
         if (userId == null || userId.isBlank()) {
             throw new IllegalArgumentException("userId 不能为空");
-        }
-    }
-
-    private static void move(Path temp, Path target) throws IOException {
-        try {
-            Files.move(temp, target, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
-        } catch (IOException e) {
-            Files.move(temp, target, StandardCopyOption.REPLACE_EXISTING);
-        }
-    }
-
-    private static void restrictPermissions(Path path) {
-        try {
-            Files.setPosixFilePermissions(path, PosixFilePermissions.fromString("rw-------"));
-        } catch (UnsupportedOperationException | IOException ignored) {
-            // Windows 没有 POSIX 权限；用户目录继承的 ACL 已排除普通用户（管理员仍可读）
         }
     }
 }

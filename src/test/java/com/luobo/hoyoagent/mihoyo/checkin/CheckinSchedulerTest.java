@@ -53,7 +53,7 @@ class CheckinSchedulerTest {
 
     private CheckinService checkin;
 
-    private CheckinRecordStore store;
+    private FileCheckinRecordStore store;
 
     private AccountService accounts;
 
@@ -64,7 +64,7 @@ class CheckinSchedulerTest {
     @BeforeEach
     void setUp() {
         checkin = mock(CheckinService.class);
-        store = new CheckinRecordStore(dir, JsonMapper.builder().build());
+        store =  new FileCheckinRecordStore(dir, JsonMapper.builder().build());
         accounts = mock(AccountService.class);
         when(accounts.credentialOf("local")).thenReturn(Optional.of(LOCAL_CRED));
         when(accounts.all()).thenReturn(List.of(LOCAL_ACCOUNT));

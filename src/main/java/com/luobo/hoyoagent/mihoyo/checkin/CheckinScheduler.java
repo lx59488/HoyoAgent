@@ -162,7 +162,7 @@ public class CheckinScheduler {
             String date = LocalDate.now(zone).toString();
             Optional<CheckinRecord> today = todayRecord(date);
             if (trigger != CheckinRecord.Trigger.MANUAL && today.filter(CheckinRecord::done).isPresent()) {
-                log.info("[CHECKIN] 今天已签过（{}），跳过 {}", CheckinRecordStore.describe(today.get()), trigger);
+                log.info("[CHECKIN] 今天已签过（{}），跳过 {}", today.get().describe(), trigger);
                 return today.get();
             }
             Credential credential = accounts.credentialOf(userId).orElse(null);
@@ -437,7 +437,7 @@ public class CheckinScheduler {
         }
         try {
             log.info("[CHECKIN] 定时签到已启用 cron=\"{}\" zone={} 下次={} 记录目录={}",
-                    cron, zone, nextRun(), records.root());
+                    cron, zone, nextRun(), records.location());
         } catch (RuntimeException e) {
             throw new IllegalStateException("hoyo.checkin.cron 解析失败: " + cron, e);
         }

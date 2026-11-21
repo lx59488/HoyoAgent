@@ -22,12 +22,12 @@ class CheckinRecordStoreTest {
     @TempDir
     Path dir;
 
-    private CheckinRecordStore store;
+    private FileCheckinRecordStore store;
 
     @BeforeEach
     void setUp() {
         // 不能用字段初始化：@TempDir 在实例构造之后才注入
-        store = new CheckinRecordStore(dir, JsonMapper.builder().build());
+        store = new FileCheckinRecordStore(dir, JsonMapper.builder().build());
     }
 
     @Test

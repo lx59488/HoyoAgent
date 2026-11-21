@@ -1,56 +1,64 @@
 package com.luobo.hoyoagent.agent.memory;
 
+import com.luobo.hoyoagent.common.storage.LocalFileStore;
 import dev.langchain4j.data.message.ChatMessage;
 import dev.langchain4j.data.message.ChatMessageDeserializer;
 import dev.langchain4j.data.message.ChatMessageSerializer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 
 import java.io.IOException;
-import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.StandardCopyOption;
-import java.nio.file.StandardOpenOption;
-import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.*;
-import java.util.stream.Stream;
 
 @Component
+@ConditionalOnProperty(name = "hoyo.storage.backend", havingValue = "file", matchIfMissing = true)
 public class FileMemoryStore implements MemoryStore {
-
     private static final Logger log = LoggerFactory.getLogger(FileMemoryStore.class);
+
+    private static final String SUFFIX = ".json";
 
     /** 磁盘格式版本。不认识的版本一律当"没有记忆"——和 CheckinRecordStore 的约定一致。 */
     private static final int FORMAT_VERSION = 1;
 
-    private final Path root;
+    private final LocalFileStore store;
+
     private final Duration retention;
+
     private final ObjectMapper mapper;
 
+    @Autowired
     public FileMemoryStore(@Value("${hoyo.memory.dir:}") String dir,
-                                 @Value("${hoyo.memory.retention:30d}") Duration retention,
-                                 ObjectMapper mapper) {
-        this.root = dir == null || dir.isBlank()
-                ? Path.of(System.getProperty("user.home"), ".hoyo", "memory")
-                : Path.of(dir);
+                           @Value("${hoyo.state-dir:}") String stateDir,
+                           @Value("${hoyo.memory.retention:30d}") Duration retention,
+                           ObjectMapper mapper) {
+        this(LocalFileStore.resolve(dir, LocalFileStore.stateRoot(stateDir).resolve("memory")), retention, mapper);
+    }
+
+    /** 单测用：直接给目录。 */
+    FileMemoryStore(String dir, Duration retention, ObjectMapper mapper) {
+        this(LocalFileStore.at(Path.of(dir)), retention, mapper);
+    }
+
+    private FileMemoryStore(LocalFileStore store, Duration retention, ObjectMapper mapper) {
+        this.store = store;
         this.retention = retention;
         this.mapper = mapper;
-        try {
-            Files.createDirectories(root);
-        } catch (IOException e) {
-            throw new IllegalStateException("创建记忆目录失败: " + root, e);
-        }
-        log.info("[MEMORY] 落盘目录={} 保留期={}", root, retention);
+        // 记忆目录建不出来就没有"落盘记忆"，这是启动期事实，早炸比晚炸好
+        store.ensureRoot();
+        log.info("[MEMORY] 落盘目录={} 保留期={}", store.root(), retention);
     }
+
 
     @Override
     public Optional<Stored> load(String sessionId) {
@@ -59,7 +67,7 @@ public class FileMemoryStore implements MemoryStore {
             return Optional.empty();
         }
         try {
-            JsonNode node = mapper.readTree(Files.readString(file, StandardCharsets.UTF_8));
+            JsonNode node = mapper.readTree(LocalFileStore.readString(file));
             int version = node.path("v").asInt(-1);
             if (version != FORMAT_VERSION) {
                 log.warn("[MEMORY] 未知格式 v={}，当作没有记忆: {}", version, file.getFileName());
@@ -77,6 +85,7 @@ public class FileMemoryStore implements MemoryStore {
 
     @Override
     public void save(String sessionId, List<ChatMessage> messages, Instant updatedAt) {
+        // 先算路径：fileOf 对空 sessionId 会抛，放在 try 里会让 catch 再抛一次
         Path file = fileOf(sessionId);
         try {
             Map<String, Object> envelope = new LinkedHashMap<>();
@@ -84,10 +93,7 @@ public class FileMemoryStore implements MemoryStore {
             envelope.put("updatedAt", updatedAt.toString());
             envelope.put("messages", mapper.readTree(ChatMessageSerializer.messagesToJson(messages)));
 
-            Path tmp = file.resolveSibling(file.getFileName() + ".tmp");
-            Files.writeString(tmp, mapper.writeValueAsString(envelope), StandardCharsets.UTF_8,
-                    StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING);
-            Files.move(tmp, file, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
+            LocalFileStore.writeAtomic(file, mapper.writeValueAsString(envelope));
         } catch (IOException | RuntimeException e) {
             // 写失败只记日志：记忆是体验，不是业务事实
             log.warn("[MEMORY] 写记忆文件失败: {} ({})", file.getFileName(), e.toString());
@@ -107,18 +113,17 @@ public class FileMemoryStore implements MemoryStore {
     @Scheduled(cron = "0 30 4 * * *", zone = "Asia/Shanghai")
     public void purgeExpired() {
         Instant cutoff = Instant.now().minus(retention);
-        try (Stream<Path> files = Files.list(root)) {
-            files.filter(path -> path.getFileName().toString().endsWith(".json"))
-                    .forEach(path -> {
-                        try {
-                            if (Files.getLastModifiedTime(path).toInstant().isBefore(cutoff)) {
-                                Files.deleteIfExists(path);
-                                log.info("[MEMORY] 清理过期记忆 {}", path.getFileName());
-                            }
-                        } catch (IOException e) {
-                            log.warn("[MEMORY] 清理失败: {} ({})", path.getFileName(), e.toString());
-                        }
-                    });
+        try {
+            for (Path path : LocalFileStore.listFiles(store.root(), SUFFIX)) {
+                try {
+                    if (Files.getLastModifiedTime(path).toInstant().isBefore(cutoff)) {
+                        Files.deleteIfExists(path);
+                        log.info("[MEMORY] 清理过期记忆 {}", path.getFileName());
+                    }
+                } catch (IOException e) {
+                    log.warn("[MEMORY] 清理失败: {} ({})", path.getFileName(), e.toString());
+                }
+            }
         } catch (IOException e) {
             log.warn("[MEMORY] 扫描记忆目录失败: {}", e.toString());
         }
@@ -126,12 +131,6 @@ public class FileMemoryStore implements MemoryStore {
 
     /** sessionId 里有冒号和 openid，不能直接当文件名；用 sha256 前 32 位，和 FileAccountStore 一个套路。 */
     Path fileOf(String sessionId) {
-        try {
-            byte[] digest = MessageDigest.getInstance("SHA-256")
-                    .digest(sessionId.getBytes(StandardCharsets.UTF_8));
-            return root.resolve(HexFormat.of().formatHex(digest).substring(0, 32) + ".json");
-        } catch (NoSuchAlgorithmException e) {
-            throw new IllegalStateException("SHA-256 不可用", e);
-        }
+        return store.fileOf(sessionId, 32, SUFFIX);
     }
 }

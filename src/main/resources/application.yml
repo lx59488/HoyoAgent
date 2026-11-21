@@ -22,17 +22,22 @@ hoyo:
   device-id: ${HOYO_DEVICE_ID:}          # 空 = 自动生成；复现已有会话时必须填抓包值
   cookie: ${HOYO_COOKIE:}                # 兜底；扫码写入账号目录后优先用文件
   user-id: ${HOYO_USER_ID:local}         # 单用户阶段固定 local；多用户后由平台适配器注入
-  # account-dir: ${HOYO_ACCOUNT_DIR:}    # 默认 ~/.hoyo/accounts（每用户一个 .account 文件）
+  state-dir: ${HOYO_STATE_DIR:}          # 本地状态根，默认 ~/.hoyo；docker/k8s 指到挂载卷即可整体搬家
+  # account-dir: ${HOYO_ACCOUNT_DIR:}    # 默认 <state-dir>/accounts（每用户一个 .account 文件）
+  storage:
+    backend: ${HOYO_STORAGE_BACKEND:file}   # 持久化实现选择：目前只有 file；新增 jdbc 时只改这一行
   checkin:
     enabled: ${HOYO_CHECKIN_ENABLED:true}
     cron: "${HOYO_CHECKIN_CRON:0 10 0 * * *}"   # 秒 分 时 日 月 周
     zone: ${HOYO_CHECKIN_ZONE:Asia/Shanghai}    # cron 与"今天"都按这个时区算
     startup-delay: ${HOYO_CHECKIN_STARTUP_DELAY:60s}  # 启动后多久补签（错过 00:10 时）
-    dir: ${HOYO_CHECKIN_DIR:}           # 默认 ~/.hoyo/checkin，一天一个 JSON
+    dir: ${HOYO_CHECKIN_DIR:}           # 默认 <state-dir>/checkin，一天一个 JSON
   memory:
     max-messages: ${HOYO_MEMORY_MAX_MESSAGES:20}   # 一次工具调用占 3~4 条，20 ≈ 4~5 轮
     max-sessions: ${HOYO_MEMORY_MAX_SESSIONS:200}  # 超了淘汰最久未用
     idle-ttl: ${HOYO_MEMORY_IDLE_TTL:2h}           # 空闲超时 = 下次访问当作新会话
+    dir: ${HOYO_MEMORY_DIR:}                       # 默认 <state-dir>/memory，一个会话一个 JSON
+    retention: ${HOYO_MEMORY_RETENTION:30d}        # 落盘记忆保留期，每天 04:30 清一次
   notify:
     enabled: ${HOYO_NOTIFY_ENABLED:false}   # 签到结果推送；默认关，关了只写日志 + 落盘
     url: ${HOYO_NOTIFY_URL:}                # webhook 地址（企业微信/飞书/Bark/自建）
