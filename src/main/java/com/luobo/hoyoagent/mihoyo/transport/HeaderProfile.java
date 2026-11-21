@@ -1,7 +1,5 @@
 package com.luobo.hoyoagent.mihoyo.transport;
 
-import com.luobo.hoyoagent.mihoyo.sign.DsSigner;
-
 import java.util.LinkedHashMap;
 import java.util.Map;
 /** 一套请求头 = 一个不可变值。DS 模式、salt、版本必须配对，所以捆在一起。 */

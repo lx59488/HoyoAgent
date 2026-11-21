@@ -1,4 +1,4 @@
-package com.luobo.hoyoagent.mihoyo.sign;
+package com.luobo.hoyoagent.mihoyo.transport;
 
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;

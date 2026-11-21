@@ -1,4 +1,4 @@
-package com.luobo.hoyoagent.agent.notify;
+package com.luobo.hoyoagent.channel.notify;
 /**
  * 出站通知通道：只负责把一条 Notification 送到某个地方。
  *

@@ -2,7 +2,7 @@ package com.luobo.hoyoagent.mihoyo.checkin;
 
 import com.luobo.hoyoagent.mihoyo.credential.AccountService;
 import com.luobo.hoyoagent.mihoyo.credential.Credential;
-import com.luobo.hoyoagent.mihoyo.dto.GameRole;
+import com.luobo.hoyoagent.mihoyo.role.GameRole;
 import com.luobo.hoyoagent.mihoyo.role.GameRoleService;
 import com.luobo.hoyoagent.mihoyo.transport.MihoyoResult;
 import org.junit.jupiter.api.Tag;

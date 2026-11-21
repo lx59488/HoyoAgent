@@ -7,7 +7,7 @@ import com.luobo.hoyoagent.mihoyo.auth.QrImage;
 import com.luobo.hoyoagent.mihoyo.auth.QrLoginService;
 import com.luobo.hoyoagent.mihoyo.credential.AccountService;
 import com.luobo.hoyoagent.mihoyo.credential.Credential;
-import com.luobo.hoyoagent.mihoyo.dto.GameRole;
+import com.luobo.hoyoagent.mihoyo.role.GameRole;
 import com.luobo.hoyoagent.mihoyo.role.GameRoleService;
 import org.springframework.http.CacheControl;
 import org.springframework.http.MediaType;

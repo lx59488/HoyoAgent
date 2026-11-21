@@ -1,4 +1,4 @@
-package com.luobo.hoyoagent.mihoyo.sign;
+package com.luobo.hoyoagent.mihoyo.transport;
 
 import org.junit.jupiter.api.Test;
 

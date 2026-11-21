@@ -1,6 +1,6 @@
 package com.luobo.hoyoagent.mihoyo.checkin;
 
-import com.luobo.hoyoagent.mihoyo.enums.MihoyoHost;
+import com.luobo.hoyoagent.mihoyo.transport.MihoyoHost;
 
 import java.util.Arrays;
 import java.util.Optional;

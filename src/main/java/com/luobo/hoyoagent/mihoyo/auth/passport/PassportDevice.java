@@ -1,7 +1,7 @@
 package com.luobo.hoyoagent.mihoyo.auth.passport;
 
 import com.luobo.hoyoagent.common.storage.LocalFileStore;
-import com.luobo.hoyoagent.mihoyo.sign.DsSigner;
+import com.luobo.hoyoagent.mihoyo.transport.DsSigner;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;

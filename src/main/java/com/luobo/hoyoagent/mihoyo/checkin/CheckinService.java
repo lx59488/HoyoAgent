@@ -4,7 +4,7 @@ import com.luobo.hoyoagent.common.exception.BusinessException;
 import com.luobo.hoyoagent.common.exception.ErrorCode;
 import com.luobo.hoyoagent.mihoyo.checkin.dto.LunaInfo;
 import com.luobo.hoyoagent.mihoyo.credential.Credential;
-import com.luobo.hoyoagent.mihoyo.dto.GameRole;
+import com.luobo.hoyoagent.mihoyo.role.GameRole;
 import com.luobo.hoyoagent.mihoyo.error.ErrorKind;
 import com.luobo.hoyoagent.mihoyo.error.MihoyoError;
 import com.luobo.hoyoagent.mihoyo.role.GameRoleService;

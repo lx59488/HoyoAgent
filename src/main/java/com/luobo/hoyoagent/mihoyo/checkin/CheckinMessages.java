@@ -1,6 +1,6 @@
 package com.luobo.hoyoagent.mihoyo.checkin;
 
-import com.luobo.hoyoagent.agent.notify.Notification;
+import com.luobo.hoyoagent.channel.notify.Notification;
 
 /** 签到结果 → 通知内容。纯函数，不依赖任何传输实现。 */
 public final class CheckinMessages {

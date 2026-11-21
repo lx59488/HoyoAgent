@@ -5,8 +5,8 @@
 > 设计原则：**先用假数据学 Agent，再接真实 API**。两条线并行、互不阻塞。
 
 **最后更新：2026-11-21**（持久化收口：新增 `LocalFileStore`、`hoyo.state-dir` 统一状态根、
-`CheckinRecordStore` 接口化，见文末维护记录；P9 的 3 天观察仍是 **0/3**；
-QQ 主线 P11 已落地但**未真机验收**）
+`CheckinRecordStore` 接口化；包结构：`agent/notify` → `channel/notify`，断开 `mihoyo ⇄ agent` 环。
+见文末维护记录；P9 的 3 天观察仍是 **0/3**；QQ 主线 P11 已落地但**未真机验收**）
 
 ---
 
@@ -42,23 +42,28 @@ QQ 主线 P11 已落地但**未真机验收**）
 ```
 com.luobo.hoyoagent
 ├── adapter/   入站：http（调试页 / API）、qq（官方机器人 WS 网关 + 被动回复）
-├── agent/     Agent 层：AiService、工具、记忆、通知、观测；依赖 mihoyo，不反向
-├── channel/   平台无关的会话管道：切片（TextChunker）、会话→用户映射（SessionRegistry）
+├── agent/     Agent 层：AiService、工具、记忆、观测；依赖 mihoyo，不反向
+├── channel/   平台无关的管道：切片（TextChunker）、会话→用户映射（SessionRegistry）、
+│              出站通知（notify/：Notifier 接口 + WebhookNotifier 实现）
 ├── common/    横切：统一响应信封（ApiResult）、错误码、异常处理、日志脱敏（Mask）、
 │              本地存储基座（storage/LocalFileStore：目录解析 + 原子写 + 哈希文件名）
 └── mihoyo/    出站：米游社客户端
-    ├── transport/   唯一 HTTP 管道 + 请求头套装（salt/版本锁在一起）
+    ├── transport/   唯一 HTTP 管道 + 请求头套装（salt/版本锁在一起）+ DsSigner / MihoyoHost
     ├── credential/  Account / Credential / CookieJar；AccountService 是凭据唯一入口
     ├── auth/        扫码登录（passport） · checkin/ 签到 · binding/ 绑定编排
-    ├── gamerecord/  战绩/角色接口 · role/ 角色缓存 · client/ device_id
-    ├── error/       retcode → ErrorKind 映射 · sign/ DS 签名 · enums/ host
+    ├── gamerecord/  战绩接口 · role/ 角色模型（GameRole）+ 缓存 · client/ device_id
+    ├── error/       retcode → ErrorKind 映射
     └── config/      HoyoProperties（hoyo.*）+ MihoyoEndpoints（host 覆盖）
 ```
 
 **三条边界**（改代码前先确认自己在哪一边）：
 
-1. `adapter` 只表示**入站**，`mihoyo` 表示**出站**，`channel` 只放**平台无关**的会话管道。
+1. `adapter` 只表示**入站**，`mihoyo` 表示**出站**，`channel` 只放**平台无关**的管道
+   （切片 / 会话映射 / 出站通知）。
 2. `mihoyo` 不依赖 `agent` / `adapter`；`agent` 可以依赖 `mihoyo`。
+   2026-11-21：把 `agent/notify` 下移到 `channel/notify` 之后这条才真正成立——
+   此前 `mihoyo.checkin` 反向依赖 `agent.notify`，两层成环。
+   **目前没有测试守着，改代码时请手动核对**（见文末"依赖方向测试仍未做"）。
 3. 凭据只有一个入口 `AccountService`：工具和控制器都从它拿，不自己读文件、不自己读 `.env`。
    （2026-11-20 删掉 `CredentialProvider` 后，写路径也只剩 `save`/`claim` 一个。）
 
@@ -823,6 +828,21 @@ java -jar target\HoyoAgent-0.0.1-SNAPSHOT.jar "--spring.config.import=optional:f
     TTL 的单位应该是"轮"而不是"秒"
 
 **维护记录**
+
+- 2026-11-21 包结构调整（无行为变更；`clean test` 132 条全绿）：
+  1) `agent/notify` → `channel/notify`（4 个文件，只改 `package`）：`mihoyo.checkin` 之前反向依赖
+     `agent.notify`，`mihoyo` 与 `agent` 成环，违反上面第 2 条边界。`Notifier` 自己的注释写着
+     "出站通知通道、签名里不出现业务名词"，它本来就不是 agent 概念。挪完层序单向：
+     `common ← channel ← mihoyo ← agent ← adapter`（实测 `mihoyo → agent` 从 2 处降到 0）。
+  2) 三个"按类型种类"的单类包消失：`mihoyo/dto/GameRole` → `role/`（跟着消费方走）、
+     `mihoyo/enums/MihoyoHost` 与 `mihoyo/sign/DsSigner` → `transport/`（前者与
+     `Profiles`/`HeaderProfile` 同属请求头套装，后者是 HTTP 管道的一部分）。
+     分包轴线从"它是什么种类的类型"改成"它服务于谁"。
+  3) `DsSignerTest` 跟着搬到 `mihoyo/transport` 并改 `package`，`mihoyo/sign` 包彻底消失
+     （测试留在已无主代码的包里会让包名说谎，也会挡住将来"测试包必须与主代码包一致"的规则）。
+  4) **依赖方向测试仍未做**：这次是靠手动扫描确认无违规。也就是说上面那三条边界现在还是
+     "约定"，不是"事实"——下次谁再写一个反向 import，没有任何东西会红。
+     候选实现：ArchUnit（一个 test 依赖，扫字节码）或零依赖的源码 import 扫描（约 30 行）。
 
 - 2026-11-21 持久化收口（无行为变更；132 条测试全绿）：
   1) 新增 `common/storage/LocalFileStore`：**原子写 4 份、sha256 文件名 3 份、默认根目录 6 处硬编码、

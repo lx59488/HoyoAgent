@@ -1,4 +1,4 @@
-package com.luobo.hoyoagent.mihoyo.dto;
+package com.luobo.hoyoagent.mihoyo.role;
 
 /**
  * 账号下绑定的游戏角色（原神/星铁/绝区零各一条）。

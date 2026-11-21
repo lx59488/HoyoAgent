@@ -5,7 +5,7 @@ import com.luobo.hoyoagent.common.exception.ErrorCode;
 import com.luobo.hoyoagent.mihoyo.MihoyoEndpoints;
 import com.luobo.hoyoagent.mihoyo.client.DeviceIdProvider;
 import com.luobo.hoyoagent.mihoyo.credential.CookieJar;
-import com.luobo.hoyoagent.mihoyo.enums.MihoyoHost;
+import com.luobo.hoyoagent.mihoyo.transport.MihoyoHost;
 import com.luobo.hoyoagent.mihoyo.transport.HeaderProfile;
 import com.luobo.hoyoagent.mihoyo.transport.MihoyoHttp;
 import com.luobo.hoyoagent.mihoyo.transport.MihoyoRequest;

@@ -1,7 +1,7 @@
 package com.luobo.hoyoagent.mihoyo;
 
 import com.luobo.hoyoagent.mihoyo.config.HoyoProperties;
-import com.luobo.hoyoagent.mihoyo.enums.MihoyoHost;
+import com.luobo.hoyoagent.mihoyo.transport.MihoyoHost;
 import org.springframework.stereotype.Component;
 
 import java.util.EnumMap;

@@ -1,4 +1,4 @@
-package com.luobo.hoyoagent.agent.notify;
+package com.luobo.hoyoagent.channel.notify;
 
 public record Notification(String title, String text, Level level) {
 

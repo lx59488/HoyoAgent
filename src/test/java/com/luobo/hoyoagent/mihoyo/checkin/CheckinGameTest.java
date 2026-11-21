@@ -2,7 +2,7 @@ package com.luobo.hoyoagent.mihoyo.checkin;
 
 import com.luobo.hoyoagent.mihoyo.MihoyoEndpoints;
 import com.luobo.hoyoagent.mihoyo.config.HoyoProperties;
-import com.luobo.hoyoagent.mihoyo.enums.MihoyoHost;
+import com.luobo.hoyoagent.mihoyo.transport.MihoyoHost;
 import org.junit.jupiter.api.Test;
 
 import java.time.Duration;

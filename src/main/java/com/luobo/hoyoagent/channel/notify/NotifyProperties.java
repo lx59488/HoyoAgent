@@ -1,4 +1,4 @@
-package com.luobo.hoyoagent.agent.notify;
+package com.luobo.hoyoagent.channel.notify;
 
 import org.springframework.boot.context.properties.ConfigurationProperties;
 

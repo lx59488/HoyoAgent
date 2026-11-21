@@ -1,4 +1,4 @@
-package com.luobo.hoyoagent.agent.notify;
+package com.luobo.hoyoagent.channel.notify;
 
 import com.luobo.hoyoagent.common.log.Mask;
 import org.slf4j.Logger;

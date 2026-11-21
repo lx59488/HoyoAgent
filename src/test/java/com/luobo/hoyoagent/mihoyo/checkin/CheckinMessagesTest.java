@@ -1,6 +1,6 @@
 package com.luobo.hoyoagent.mihoyo.checkin;
 
-import com.luobo.hoyoagent.agent.notify.Notification;
+import com.luobo.hoyoagent.channel.notify.Notification;
 import com.luobo.hoyoagent.mihoyo.error.ErrorKind;
 import org.junit.jupiter.api.Test;
 

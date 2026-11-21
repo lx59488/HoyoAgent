@@ -1,4 +1,4 @@
-package com.luobo.hoyoagent.mihoyo.enums;
+package com.luobo.hoyoagent.mihoyo.transport;
 
 /**
  * 米游社各个 host 的默认值。

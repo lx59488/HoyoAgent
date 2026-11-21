@@ -2,7 +2,7 @@ package com.luobo.hoyoagent.mihoyo.checkin;
 
 import com.luobo.hoyoagent.common.log.Mask;
 
-import com.luobo.hoyoagent.agent.notify.Notifier;
+import com.luobo.hoyoagent.channel.notify.Notifier;
 import com.luobo.hoyoagent.mihoyo.credential.Account;
 import com.luobo.hoyoagent.mihoyo.credential.AccountService;
 import com.luobo.hoyoagent.mihoyo.credential.Credential;

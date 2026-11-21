@@ -4,7 +4,7 @@ import com.luobo.hoyoagent.common.exception.BusinessException;
 import com.luobo.hoyoagent.common.exception.ErrorCode;
 import com.luobo.hoyoagent.mihoyo.MihoyoEndpoints;
 import com.luobo.hoyoagent.mihoyo.credential.Credential;
-import com.luobo.hoyoagent.mihoyo.sign.DsSigner;
+import com.luobo.hoyoagent.mihoyo.transport.DsSigner;
 import com.luobo.hoyoagent.mihoyo.transport.MihoyoHttp;
 import com.luobo.hoyoagent.mihoyo.transport.MihoyoRequest;
 import com.luobo.hoyoagent.mihoyo.transport.MihoyoResult;
