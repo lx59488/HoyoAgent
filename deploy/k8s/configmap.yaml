@@ -13,10 +13,7 @@ data:
   DS_BASE_URL: https://api.deepseek.com/v1
   DS_MODEL_NAME: deepseek-flash
 
-  # 单用户阶段固定 local
-  HOYO_USER_ID: local
-
-  # 每日签到：00:10 跑，失败不重试，看日志和 /api/checkin/status
+  # 每日签到：00:10 跑，失败不重试，看日志 / 通知
   HOYO_CHECKIN_ENABLED: "true"
   HOYO_CHECKIN_CRON: "0 10 0 * * *"
   HOYO_CHECKIN_ZONE: Asia/Shanghai

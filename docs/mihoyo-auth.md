@@ -1,10 +1,10 @@
 # 米游社账号接入与多用户绑定设计
 
-> 状态：**登录 + 单账号签到已落地并真机验证（2026-11-12）**。
-> A（扫码登录）、B（换票 + v2）、E 的单角色签到与幂等已通；E 的定时调度/通知未做。
-> 多用户绑定（C/D）仍是设计。当前项目只有一个账号（cookie 来自 `.env` 或扫码写入的文件）。
+> 状态：**登录 + 扫码绑定 + 多账号签到已落地（2026-11-21）**。
+> A（扫码登录）、B（换票 + v2）已通；C（多用户凭据存储）与 D（per-user 工具/记忆隔离）已落地。
+> **2026-11-22 起单用户 `local` 账号删除**：没有 `HOYO_COOKIE` / `credential.properties` 兜底，
+> 绑定唯一入口是 QQ 机器人。
 > 参考实现：[FufuLauncher](https://github.com/FufuLauncher/FufuLauncher)（MIT，C#），本文只提取事实，不复制代码。
-> 事实核对基准：`master@e643627`（2026-11-12）。
 
 ---
 
@@ -184,8 +184,8 @@ Cookie: mid=<mid>; stoken=<stoken>; stuid=<uid>
 |---|---|---|---|---|
 | **A** | 扫码登录拿到 `stoken` + `mid` | 1 天 | 两个值能打印出来，且用它们换到 ltoken | ✅ 真机扫码通过（`WAITING→SCANNED→BOUND`） |
 | **B** | `stoken` → `ltoken` / `cookie_token` / `*_v2` | 半天 | 成功查到绑定角色（`getUserGameRolesByCookie`） | ✅ 全部换到；角色列表接口 11-13 删除 |
-| **C** | 多用户凭据存储（加密 + 按 userId 检索） | 1 天 | 两个账号的数据互不串 | 未开始 |
-| **D** | per-user 工具与记忆隔离 | 1 天 | 用户 A 问"我有哪些角色"，只返回 A 的 | 未开始（依赖 P7 的 `ChatMemory`） |
+| **C** | 多用户凭据存储（按 userId 检索） | 1 天 | 两个账号的数据互不串 | ✅ 2026-11-21（文件实现，未加密） |
+| **D** | per-user 工具与记忆隔离 | 1 天 | 用户 A 问"我有哪些角色"，只返回 A 的 | ✅ 2026-11-21（`@ToolMemoryId` + `SessionRegistry`） |
 | **E** | 签到调度（幂等 + 重试 + 通知） | 1 天 | 连续 3 天自动签到成功，不重复签 | 🚧 单角色签到 + 幂等已通；**调度/通知未做** |
 
 **A 和 B 是硬前置**，C~E 可以并行。
@@ -293,11 +293,10 @@ public interface CredentialCipher {
 | 抽象 | `AccountStore`（`find/save/delete/list`）+ `FileAccountStore` |
 | 布局 | `~/.hoyo/accounts/<sha256(userId) 前 16 位>.account`，每用户一个文件 |
 | 原子性 | 每文件独立「临时文件 + ATOMIC_MOVE」，改一个账号不重写其他账号 |
-| 读取优先级 | `AccountStore` → 旧 `~/.hoyo/credential.properties`（**只读兜底**）→ `.env` |
-| 迁移 | 不做破坏性迁移：登录/刷新时写入新目录，旧文件保留，可手动删除 |
+| 读取优先级 | `AccountStore`（唯一来源；2026-11-22 起旧 `credential.properties` / `.env` 兜底已删除） |
+| 多用户 | 身份来自平台适配器（QQ openid）；Web 会话没有身份，不再有 `hoyo.user-id` |
 | 加密 | ❌ 尚未实现（下一步接 `CredentialCipher`） |
 | 权限 | POSIX 设 `rw-------`；Windows 依赖用户目录继承 ACL（管理员仍可读） |
-| 多用户 | `hoyo.user-id`（默认 `local`）已预留，但解析仍是单例——见 §7 |
 
 > 为什么不是「一个全局文件」：每用户一个文件删账号=删文件，爆炸半径小；
 > 为什么不是数据库：单用户阶段没有事务/查询需求。等签到记录要落库时再换 `JdbcAccountStore`，
@@ -539,3 +538,12 @@ GET  {host}/event/luna/home?lang=zh-cn&act_id=..     ← 奖励名（可选，�
 - [ ] 签到风控触发后的冷却时间
 - [ ] `5003` 的确切含义（战绩接口只给 retcode、不给 message）
 - [ ] 多账号是否共享 `device_id`（FufuLauncher 每个账号一套 cookie，签到设备 id 取 `md5(cookie)`，天然各自独立）
+
+---
+
+## 13. 2026-11-22 变更：删除 local 账号
+
+- `local` 不再是特殊用户：`AccountService` 只按 `userId` 读账号目录，不再有 legacy/env 兜底。
+- `SessionRegistry` 查不到会话 → 没有身份；工具层回「请先绑定」，不再回退到 owner。
+- 删除 `AuthController` / `CheckinController` / `LegacyCredentialFile` / `QrLoginService.refreshV2()`。
+- 老数据迁移：`~/.hoyo/accounts` 里 `user_id=local` 的文件改名为 `qq:<openid>`，或删除后重新扫码绑定。

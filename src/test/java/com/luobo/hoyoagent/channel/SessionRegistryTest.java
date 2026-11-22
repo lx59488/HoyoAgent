@@ -7,19 +7,27 @@ import static org.assertj.core.api.Assertions.assertThat;
 class SessionRegistryTest {
 
     @Test
-    void unknownSessionFallsBackToLocal() {
-        SessionRegistry registry = new SessionRegistry("local");
+    void unknownSessionHasNoIdentity() {
+        SessionRegistry registry = new SessionRegistry();
 
-        assertThat(registry.userIdOrLocal("web:abc")).isEqualTo("local");
         assertThat(registry.userIdOf("web:abc")).isEmpty();
+        assertThat(registry.userIdOf(null)).isEmpty();
     }
 
     @Test
-    void registeredSessionWins() {
-        SessionRegistry registry = new SessionRegistry("local");
+    void registeredSessionKeepsPlatformUserId() {
+        SessionRegistry registry = new SessionRegistry();
         registry.register("qqbot:c2c:AAA", "qq:AAA");
 
-        assertThat(registry.userIdOrLocal("qqbot:c2c:AAA")).isEqualTo("qq:AAA");
         assertThat(registry.userIdOf("qqbot:c2c:AAA")).contains("qq:AAA");
+    }
+
+    @Test
+    void blankValuesAreIgnored() {
+        SessionRegistry registry = new SessionRegistry();
+        registry.register("", "qq:AAA");
+        registry.register("qqbot:c2c:AAA", " ");
+
+        assertThat(registry.userIdOf("qqbot:c2c:AAA")).isEmpty();
     }
 }

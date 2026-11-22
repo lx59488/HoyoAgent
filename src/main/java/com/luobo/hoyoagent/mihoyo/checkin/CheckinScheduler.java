@@ -31,23 +31,23 @@ import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.locks.ReentrantLock;
 
 /**
- * 每日自动签到：00:10 跑一次，启动后补一次，结果落盘并可查。
+ * 每日自动签到：00:10 跑一次，启动后补一次，结果落盘。
  *
  * <p>三个刻意的决定：
  * <ol>
  *   <li><b>每轮只试一次，失败不自动重试。</b>重试会把"连续 3 天成功"这个验收条件糊掉——
- *       失败就该亮灯让人看见，而不是靠重试掩盖。手动补跑用 {@code POST /api/checkin/run?force=true}。</li>
+ *       失败就该亮灯让人看见，而不是靠重试掩盖。</li>
  *   <li><b>启动补签</b>：cron 只在进程活着的时候才会触发，笔记本合盖一晚就错过整天。
  *       启动后 {@code hoyo.checkin.startup-delay}（默认 60s）补一次，今天已经有 DONE 记录就跳过。</li>
  *   <li><b>所有失败都走同一个前缀</b> {@link #ALERT}，日志里搜一次就能捞出来；
- *       同时写记录文件，重启后 {@code /api/checkin/status} 还能看见。</li>
+ *       同时写记录文件，重启后还能查。</li>
  *   <li><b>结果顺带推给 {@link Notifier}</b>（默认关，{@code hoyo.notify.enabled=true} 才发）：
  *       推送失败只打日志，不影响签到结果。</li>
  * </ol>
  *
- * <p>多用户：定时任务走 {@link #runAll}，遍历 {@link AccountService#all()}，每人各自判定
+ * <p>只有 {@link #runAll} 一条入口：遍历 {@link AccountService#all()}，每人各自判定
  * "今天是不是已经 DONE"；记录按 userId 分目录（见 {@link CheckinRecordStore}）。
- * {@link #run} 保留单账号语义，只服务网页调试口和单元测试。
+ * 一个账号都没绑就什么都不做。
  */
 @Component
 public class CheckinScheduler {
@@ -76,8 +76,6 @@ public class CheckinScheduler {
     /** 出站通知：默认关（hoyo.notify.enabled=false），关着时是 NOOP 之外的一个空实现，不影响签到。 */
     private final Notifier notifier;
 
-    private final String userId;
-
     private final boolean enabled;
 
     private final String cron;
@@ -99,7 +97,6 @@ public class CheckinScheduler {
                             CheckinRecordStore records,
                             AccountService accounts,
                             Notifier notifier,
-                            @Value("${hoyo.user-id:local}") String userId,
                             @Value("${hoyo.checkin.enabled:true}") boolean enabled,
                             @Value("${hoyo.checkin.cron:0 10 0 * * *}") String cron,
                             @Value("${hoyo.checkin.zone:Asia/Shanghai}") String zone,
@@ -108,7 +105,6 @@ public class CheckinScheduler {
         this.records = records;
         this.accounts = accounts;
         this.notifier = notifier;
-        this.userId = userId;
         this.enabled = enabled;
         this.cron = cron;
         this.zone = ZoneId.of(zone);
@@ -144,35 +140,6 @@ public class CheckinScheduler {
     }
 
     /**
-     * 单账号入口：只跑 {@code hoyo.user-id} 那一个（网页调试页和单元测试用）。
-     *
-     * <p>定时任务走 {@link #runAll}——那里才是多用户。两个方法共用 {@link #execute}，
-     * 区别只在"跑谁"，不在"怎么跑"。
-     */
-    public CheckinRecord run(CheckinRecord.Trigger trigger) {
-        if (trigger != CheckinRecord.Trigger.MANUAL && !enabled) {
-            log.info("[CHECKIN] 定时签到已关闭（hoyo.checkin.enabled=false），跳过 {}", trigger);
-            return null;
-        }
-        if (!lock.tryLock()) {
-            log.warn("[CHECKIN] 上一次签到还没跑完，跳过本次 {}", trigger);
-            return null;
-        }
-        try {
-            String date = LocalDate.now(zone).toString();
-            Optional<CheckinRecord> today = todayRecord(date);
-            if (trigger != CheckinRecord.Trigger.MANUAL && today.filter(CheckinRecord::done).isPresent()) {
-                log.info("[CHECKIN] 今天已签过（{}），跳过 {}", today.get().describe(), trigger);
-                return today.get();
-            }
-            Credential credential = accounts.credentialOf(userId).orElse(null);
-            return execute(userId, credential, date, trigger);
-        } finally {
-            lock.unlock();
-        }
-    }
-
-    /**
      * 跑所有已绑定账号：账号间最多 3 并发，账号内串行（由 {@link CheckinService} 保证）。
      *
      * <p>每个账号各自判断"今天是不是已经 DONE"，所以某个人手动补跑过，不会拖累其他人。
@@ -190,9 +157,8 @@ public class CheckinScheduler {
             String date = LocalDate.now(zone).toString();
             List<Account> all = accounts.all();
             if (all.isEmpty()) {
-                // 一个号都没绑：留一条记录，状态页才知道"跑过了，只是没东西可签"
-                return List.of(finish(userId, date, trigger, CheckinRecord.Outcome.SKIPPED, null,
-                        Instant.now(), "未绑定米游社账号：先扫码登录或填 HOYO_COOKIE", List.of()));
+                log.info("[CHECKIN] {} 跳过：一个账号都没绑定", trigger);
+                return List.of();
             }
 
             List<Account> pending = new ArrayList<>();
@@ -258,7 +224,7 @@ public class CheckinScheduler {
 
         if (credential == null || credential.cookieHeader() == null || credential.cookieHeader().isBlank()) {
             return finish(userId, date, trigger, CheckinRecord.Outcome.SKIPPED, null, started,
-                    "未绑定米游社账号：先扫码登录或填 HOYO_COOKIE", List.of());
+                    "未绑定米游社账号：请在 QQ 里回复「绑定」", List.of());
         }
 
         CheckinRunResult summary;
@@ -336,46 +302,6 @@ public class CheckinScheduler {
                 .orElse(null);
     }
 
-    /** 状态页：今天的结果、最近 7 天、以及"有没有该看一眼的事"。 */
-    public Status status() {
-        ZonedDateTime now = ZonedDateTime.now(zone);
-        String date = now.toLocalDate().toString();
-        Optional<CheckinRecord> today = todayRecord(date);
-        String attention = attentionOf(today, date, now);
-        return new Status(
-                enabled,
-                cron,
-                zone.getId(),
-                nextRun(now),
-                date,
-                today.orElse(null),
-                attention != null,
-                attention,
-                records.recent(userId, 7));
-    }
-
-    /** @param now 由调用方给，测试才能锁住"还没到点"和"已经过点"两支 */
-    String attentionOf(Optional<CheckinRecord> today, String date, ZonedDateTime now) {
-        if (today.isPresent()) {
-            CheckinRecord record = today.get();
-            if (record.done()) {
-                return null;
-            }
-            return "今天签到未完成：" + record.message();
-        }
-        if (!enabled || !cronPassed(date, now)) {
-            return null;
-        }
-        return "今天还没有签到记录：定时任务可能没跑（应用当时不在线？）";
-    }
-
-    /** 今天的 cron 时点是不是已经过去了——过了还没有记录才是异常。 */
-    boolean cronPassed(String date, ZonedDateTime now) {
-        ZonedDateTime startOfDay = LocalDate.parse(date).atStartOfDay(zone).minusSeconds(1);
-        ZonedDateTime scheduled = CronExpression.parse(cron).next(startOfDay);
-        return scheduled != null && !scheduled.isAfter(now);
-    }
-
     public String nextRun() {
         return nextRun(ZonedDateTime.now(zone));
     }
@@ -383,23 +309,6 @@ public class CheckinScheduler {
     String nextRun(ZonedDateTime now) {
         ZonedDateTime next = CronExpression.parse(cron).next(now);
         return next == null ? null : next.toOffsetDateTime().toString();
-    }
-
-    public boolean enabled() {
-        return enabled;
-    }
-
-    public String cron() {
-        return cron;
-    }
-
-    public ZoneId zone() {
-        return zone;
-    }
-
-    /** 记录按用户分目录后，这里只查自己的那份；旧文件的归属由 store 判定。 */
-    private Optional<CheckinRecord> todayRecord(String date) {
-        return records.find(userId, date);
     }
 
     private static void sleep(long millis) {
@@ -410,29 +319,11 @@ public class CheckinScheduler {
         }
     }
 
-    /**
-     * 手动补跑：跑所有账号。返回本地那条是为了兼容 {@code POST /api/checkin/run} 的响应，
-     * 全量结果留给 M6 的管理后台按用户展示。
-     */
-    public CheckinRecord runManual(boolean force) {
-        String date = LocalDate.now(zone).toString();
-        if (!force) {
-            Optional<CheckinRecord> today = todayRecord(date);
-            if (today.filter(CheckinRecord::done).isPresent()) {
-                log.info("[CHECKIN] 今天已经签过，未重复请求（force=true 可强制）");
-                return today.get();
-            }
-        }
-        List<CheckinRecord> results = runAll(CheckinRecord.Trigger.MANUAL);
-        return results.stream().filter(r -> userId.equals(r.userId())).findFirst()
-                .orElse(results.isEmpty() ? null : results.get(0));
-    }
-
     /** 启动时把"到底会不会跑、下次几点"打进日志：比事后猜 cron 写没写对靠谱。 */
     @PostConstruct
     void announce() {
         if (!enabled) {
-            log.info("[CHECKIN] 定时签到已关闭（hoyo.checkin.enabled=false），仍可 POST /api/checkin/run 手动跑");
+            log.info("[CHECKIN] 定时签到已关闭（hoyo.checkin.enabled=false）");
             return;
         }
         try {
@@ -441,16 +332,5 @@ public class CheckinScheduler {
         } catch (RuntimeException e) {
             throw new IllegalStateException("hoyo.checkin.cron 解析失败: " + cron, e);
         }
-    }
-
-    public record Status(boolean enabled,
-                         String cron,
-                         String zone,
-                         String nextRun,
-                         String todayDate,
-                         CheckinRecord today,
-                         boolean needsAttention,
-                         String attention,
-                         List<CheckinRecord> recent) {
     }
 }

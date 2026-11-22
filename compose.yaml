@@ -1,6 +1,5 @@
 # HoyoAgent 单机部署：docker compose up -d --build
 #
-#   cp .env.example .env      # 首次：填 DS_API_KEY 和 HOYO_COOKIE（或之后扫码）
 #   docker compose up -d --build
 #   docker compose logs -f
 #

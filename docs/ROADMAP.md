@@ -4,9 +4,9 @@
 > 用法：从上往下做，每完成一条把 `[ ]` 改成 `[x]`。每个阶段结束后打一个 git tag（`phase-1`、`phase-2`…）。
 > 设计原则：**先用假数据学 Agent，再接真实 API**。两条线并行、互不阻塞。
 
-**最后更新：2026-11-21**（持久化收口：新增 `LocalFileStore`、`hoyo.state-dir` 统一状态根、
-`CheckinRecordStore` 接口化；包结构：`agent/notify` → `channel/notify`，断开 `mihoyo ⇄ agent` 环。
-见文末维护记录；P9 的 3 天观察仍是 **0/3**；QQ 主线 P11 已落地但**未真机验收**）
+**最后更新：2026-11-22**（删除 local 账号：`hoyo.user-id` / `HOYO_COOKIE` / 旧 `credential.properties`
+兜底、`AuthController` 与 `CheckinController` 全部移除；Web 只保留聊天调试 + 会话记忆，
+绑定与签到只在 QQ 里完成。见文末维护记录；P9 的 3 天观察仍是 **0/3**；QQ 主线 P11 已落地但**未真机验收**）
 
 ---
 
@@ -69,13 +69,12 @@ com.luobo.hoyoagent
 
 测试与脚本、前端调试页仍在原来的位置，不再逐条罗列。
 
-接口：`GET /`（调试页：扫码绑定 + 会话对话）、`GET /chat?q=`（纯问答，对照组：无工具、无记忆）、
+接口：`GET /`（调试页：只做聊天调试 + 会话记忆）、`GET /chat?q=`（纯问答，对照组：无工具、无记忆）、
 `GET /agent?q=` + **请求头 `X-Session-Id`**（带工具，返回 `{code, message, data:{reply, toolsCalled, sessionId, messages}}`；
-不传头 = 一次性会话，请求结束即销毁，行为与加记忆之前一致）、
-`POST /api/auth/qr` + `GET /api/auth/qr/{ticket}`（扫码绑定）、`GET /api/auth/status`（绑定状态）、
-`POST /api/checkin`（裸调签到，只签 local 账号、不落盘）、`POST /api/checkin/run`（走调度路径，今天已签则跳过）、
-`GET /api/checkin/status`（今日结果 + 最近 7 天 + 是否该看一眼）、
-`GET /api/memory/{sessionId}`（窗口内容 + `expired` 标记）、`DELETE /api/memory/{sessionId}`（清空会话）
+不传头 = 一次性会话，请求结束即销毁）、`GET /api/memory/{sessionId}`（窗口内容 + `expired` 标记）、
+`DELETE /api/memory/{sessionId}`（清空会话）
+
+绑定与签到不再有 HTTP 入口：在 QQ 里发「绑定」扫码，发「帮我签到」触发工具。
 
 **结构决策**：原计划放 `adapter.mihoyo`，实际改为顶层 `mihoyo/`。原因是后续会有多个入站适配器（http / qq / 将来 telegram），把「外部系统客户端」提到顶层更好表达边界。约定：**`adapter` 只表示入站，`mihoyo` 表示出站，`channel` 只放平台无关的会话管道**（切片已落，见 `TextChunker`）。
 
@@ -954,3 +953,13 @@ java -jar target\HoyoAgent-0.0.1-SNAPSHOT.jar "--spring.config.import=optional:f
   另核 `~/.hoyo/checkin/` 只有 11-13 一条，P9 的"连续 3 天"实际 **0/3**（14~16 服务未运行，非失败）。
   遗留：裁剪按条不按轮（发现 ③）；30 轮未跑；模型调用失败时本轮用户消息留在记忆里
   （`smoke-memory.ps1` 已于 11-16 补跑，见下条）。
+- 2026-11-22 删除 local 账号（单用户时代收尾）：
+    - 身份只有一个来源：`SessionRegistry` 由平台适配器注册；查不到就是"没有身份"，不再回退 `local`，
+      工具层直接回「请先绑定」（`CheckinTool` / `CheckinOverviewTool`）。
+    - 删除 `AuthController`、`CheckinController`、`LegacyCredentialFile`；`AccountService` 只读账号目录，
+      `Source` 枚举与 `sourceOf()` 一并删除；`QrLoginService.refreshV2()` 删除（只被 Web 调）。
+    - `CheckinScheduler` 只保留 `runAll`；删除 `run/runManual/status`、`hoyo.user-id` 与空账号时的占位记录。
+    - 配置删除 `HOYO_COOKIE` / `HOYO_USER_ID`；Web 删掉绑定/角色/签到面板，改为聊天 + 记忆查看；
+      删除 `scripts/login-qr.ps1` 与 `scripts/smoke-agent.ps1`。
+    - 迁移：`~/.hoyo/accounts` 里的旧 `local` 账号要么改 `user_id` 重命名为 `qq:<openid>`，
+      要么删除后重新在 QQ 里绑定；签到记录同理。

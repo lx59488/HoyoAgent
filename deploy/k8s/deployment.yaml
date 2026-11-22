@@ -75,7 +75,7 @@ spec:
           # 只读文件不联网，最便宜的「应用层」探针
           readinessProbe:
             httpGet:
-              path: /api/checkin/status
+              path: /
               port: http
             periodSeconds: 10
             timeoutSeconds: 3

@@ -1,6 +1,5 @@
 package com.luobo.hoyoagent.channel;
 
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
 import java.util.Collections;
@@ -13,14 +12,16 @@ import java.util.Optional;
  *
  * <p>为什么不让代码去"解析 sessionId 前缀"：那样任何人构造一个
  * {@code qqbot:c2c:<别人的openid>} 当 memoryId 打 HTTP 接口，就能冒充别人。
- * 只有 QQ 适配器在收到真实事件时才注册；查不到的会话一律落到 {@code local}（网页调试页）。
+ * 只有平台适配器在收到真实事件时才注册。
+ *
+ * <p>查不到就是<b>没有身份</b>：调用方必须显式处理（工具层回"请先绑定"），
+ * 而不是回退到某个默认账号——那等于把 owner 的凭据借给任何匿名请求。
  */
 @Component
 public class SessionRegistry {
 
     private static final int MAX_ENTRIES = 1000;
 
-    private final String localUserId;
 
     /** 访问序 LRU：会话再多也不会无限涨。 */
     private final Map<String, String> sessions = Collections.synchronizedMap(
@@ -31,9 +32,6 @@ public class SessionRegistry {
                 }
             });
 
-    public SessionRegistry(@Value("${hoyo.user-id:local}") String localUserId) {
-        this.localUserId = localUserId == null || localUserId.isBlank() ? "local" : localUserId.trim();
-    }
 
     public void register(String memoryId, String userId) {
         if (memoryId == null || memoryId.isBlank() || userId == null || userId.isBlank()) {
@@ -44,14 +42,5 @@ public class SessionRegistry {
 
     public Optional<String> userIdOf(String memoryId) {
         return memoryId == null ? Optional.empty() : Optional.ofNullable(sessions.get(memoryId));
-    }
-
-    /** 查不到就当 local：HTTP 调试页、一次性会话都走这里。 */
-    public String userIdOrLocal(String memoryId) {
-        return userIdOf(memoryId).orElse(localUserId);
-    }
-
-    public String localUserId() {
-        return localUserId;
     }
 }

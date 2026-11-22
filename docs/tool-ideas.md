@@ -34,7 +34,7 @@ FPS 悬浮窗、截图相册都是本地桌面能力，搬过来只会得到一�
 
 | FufuLauncher 功能 | 依赖 | 能搬吗 | 结论 |
 |---|---|---|---|
-| 多账号快速切换 | 账号体系 | ⚠️ 部分 | 项目已有 `AccountStore`，但多用户是 P8；现在做工具参数化身份 = 违反 `docs/mihoyo-auth.md` §7 的安全规则 |
+| 多账号快速切换 | 账号体系 | ✅ 已有 | 多用户已落地（2026-11-21）；但工具仍不接受身份参数，切换靠平台会话，不靠模型 |
 | 游戏签到（luna） | cookie_token | ✅ 已有 | `CheckinTool` |
 | 奖励日历 | luna/home | ✅ 可搬 | 已接 `home`；v1 先不用它（每游戏多一次请求），留给 v1.1 |
 | **社区签到（米游币）** | stoken + BBS 头 | ✅ 可搬 | 新 Profile（DS2），写操作，排第二梯队 |
@@ -134,13 +134,13 @@ FPS 悬浮窗、截图相册都是本地桌面能力，搬过来只会得到一�
 
 ### 3.2 `getAccountStatus()` —— 让失败变得可解释
 
-**现状的痛点很具体**：11-16 三个角色全 `AUTH`，但 `hasStoken=true`、`/api/auth/roles` 正常。
+**现状的痛点很具体**：11-16 三个角色全 `AUTH`，但 `hasStoken=true`、`GameRoleService` 能读到角色。
 模型只能说「签到失败」，用户无法判断该点刷新、重扫码，还是等一会儿。
 
 **返回**（全部是布尔/枚举，不含任何 token 值）：
 
 ```
-【账号】user=local · 来源=store · uid=75708228 · mid=***_mhy
+【账号】user=qq:E43830A902F2 · uid=75708228 · mid=***_mhy
 【凭据】stoken=有 · ltoken=有 · ltoken_v2=有 · cookie_token=无
 【角色】7 个（原神/星铁/绝区零/崩坏3×4）
 【上次】11-16 00:10 SCHEDULED FAILED · kind=AUTH · 「cookie_token 缺失，签到会被拒」

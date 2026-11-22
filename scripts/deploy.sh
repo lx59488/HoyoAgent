@@ -17,7 +17,7 @@ cd "$APP_DIR"
 REF="${1:-master}"
 FORCE="${FORCE:-0}"
 COMPOSE="docker compose -f compose.yaml"
-HEALTH_URL="http://127.0.0.1:8080/api/checkin/status"
+HEALTH_URL="http://127.0.0.1:8080/"
 
 log() { printf '[deploy] %s\n' "$*"; }
 die() { log "ERROR: $*"; exit 1; }

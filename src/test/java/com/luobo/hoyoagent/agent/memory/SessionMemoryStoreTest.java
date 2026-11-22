@@ -98,14 +98,14 @@ class SessionMemoryStoreTest {
 
     @Test
     void readingRefreshesIdleTimer() throws InterruptedException {
-        SessionMemoryStore store = store(200, Duration.ofMillis(40));
+        SessionMemoryStore store = store(200, Duration.ofMillis(200));
         store.updateMessages("s1", List.<ChatMessage>of(UserMessage.from("hi")));
 
-        Thread.sleep(25);
+        Thread.sleep(50);
         assertThat(store.getMessages("s1")).hasSize(1);   // 这一读会把 lastAccess 推到此刻
 
-        Thread.sleep(25);
-        // 距写入已 50ms（> 40ms），距上次读只 25ms —— 活着说明 touch() 生效了
+        Thread.sleep(50);
+        // 距写入已 100ms（< 200ms），距上次读只 50ms —— 活着说明 touch() 生效了
         assertThat(store.getMessages("s1")).hasSize(1);
     }
 

@@ -1,5 +1,6 @@
 package com.luobo.hoyoagent.mihoyo.checkin;
 
+import com.luobo.hoyoagent.mihoyo.credential.Account;
 import com.luobo.hoyoagent.mihoyo.credential.AccountService;
 import com.luobo.hoyoagent.mihoyo.credential.Credential;
 import com.luobo.hoyoagent.mihoyo.role.GameRole;
@@ -32,7 +33,11 @@ class LunaClientTest {
     AccountService accounts;
 
     private Credential credential() {
-        return accounts.requireCredential(accounts.localUserId());
+        String userId = accounts.all().stream()
+                .map(Account::userId)
+                .findFirst()
+                .orElseThrow(() -> new IllegalStateException("本机没有已绑定账号，先扫码或在 QQ 里绑定"));
+        return accounts.requireCredential(userId);
     }
 
     @Test

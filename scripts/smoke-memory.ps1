@@ -1,8 +1,9 @@
 # scripts/smoke-memory.ps1
 # 用法: pwsh -NoProfile -File .\scripts\smoke-memory.ps1
 #
-# 判定思路：记忆的证据不是"它记得"，而是"它不用再查一次"。
-# 所以 A / B 是一对差分用例，只跑 A 分不清"记得"和"恰好猜对"。
+# 2026-11-22 重写：网页会话不再有平台身份，签到类工具一律回「没有绑定」，
+# 原来「第二问不调工具」的判据失效。现在只用纯对话验证记忆：
+# 记住一个随机数 → 同会话能复述、新会话不能复述、窗口条数稳定。
 param(
     [string]$BaseUrl = 'http://localhost:8080',
     [int]$WindowProbe = 12
@@ -16,56 +17,57 @@ function Ask([string]$Question, [string]$Session) {
     if ($Session) { $p.Headers = @{ 'X-Session-Id' = $Session } }
     $r = Invoke-RestMethod @p
     if ($null -ne $r.code -and $r.code -ne 200) { throw "API code=$($r.code): $($r.message)" }
-    [pscustomobject]@{
-        Reply = $r.data.reply
-        Tools = @($r.data.toolsCalled | Where-Object { $null -ne $_ })
-    }
+    $r.data.reply
 }
 
 $run = [guid]::NewGuid().ToString('N').Substring(0, 8)
+$secret = Get-Random -Minimum 100000 -Maximum 999999
 $rows = @()
 
-# A. 正例：同一会话，第二问不该再调工具
+# A. 正例：同一会话，第二问要能复述刚才的数字
 $sa = "mem-$run-a"
-$null = Ask '帮我签个到' $sa
-$a = Ask '刚才那一次签到的结果是什么' $sa
+$null = Ask "记住这个数字：$secret。只回复 OK。" $sa
+$a = Ask '我刚才让你记住的数字是多少？只回复数字。' $sa
 $rows += [pscustomobject]@{
-    Case = 'A 正例·同会话'; Expect = '不调工具'
-    Actual = if ($a.Tools.Count) { $a.Tools -join ' & ' } else { '(none)' }
-    Hit = ($a.Tools.Count -eq 0)
+    Case   = 'A 正例·同会话'
+    Expect = "$secret"
+    Actual = $a
+    Hit    = ($a -match $secret)
 }
 
-# B. 反例：不传会话，同一句话必须重新查
-$b = Ask '刚才那一次签到的结果是什么' $null
+# B. 反例：全新会话，不该知道这个数字
+$b = Ask '我刚才让你记住的数字是多少？只回复数字。' "mem-$run-b"
 $rows += [pscustomobject]@{
-    Case = 'B 反例·无会话'; Expect = '必须调工具'
-    Actual = if ($b.Tools.Count) { $b.Tools -join ' & ' } else { '(none)' }
-    Hit = ($b.Tools.Count -gt 0)
+    Case   = 'B 反例·新会话'
+    Expect = "不含 $secret"
+    Actual = $b
+    Hit    = -not ($b -match $secret)
 }
 
-# C. 隔离：甲签过，乙问同样的话，不该白拿甲的上下文
-$sc = "mem-$run-c1"; $sd = "mem-$run-c2"
-$null = Ask '帮我签个到' $sc
-$c = Ask '刚才那一次签到的结果是什么' $sd
+# C. 隔离：另一个会话问同样的话，不该拿到 A 的上下文
+$c = Ask '我刚才让你记住的数字是多少？只回复数字。' "mem-$run-c"
 $rows += [pscustomobject]@{
-    Case = 'C 隔离·跨会话'; Expect = '必须调工具'
-    Actual = if ($c.Tools.Count) { $c.Tools -join ' & ' } else { '(none)' }
-    Hit = ($c.Tools.Count -gt 0)
+    Case   = 'C 隔离·跨会话'
+    Expect = "不含 $secret"
+    Actual = $c
+    Hit    = -not ($c -match $secret)
 }
 
 # D. 窗口：连问 N 轮，消息条数必须稳定在上限，不涨
-$se = "mem-$run-d"
+$sd = "mem-$run-d"
 for ($i = 1; $i -le $WindowProbe; $i++) {
-    $null = Ask "第 $i 句：今天签到了吗" $se
+    $null = Ask "第 $i 句：用一句话说明你在做什么" $sd
 }
-$view = Invoke-RestMethod "$BaseUrl/api/memory/$se" -TimeoutSec 30
+$view = Invoke-RestMethod "$BaseUrl/api/memory/$sd" -TimeoutSec 30
 $count = $view.data.messages
 $rows += [pscustomobject]@{
-    Case = "D 窗口·$WindowProbe 轮"; Expect = '<= max-messages'
-    Actual = "$count 条"; Hit = ($count -gt 0 -and $count -le 20)
+    Case   = "D 窗口·$WindowProbe 轮"
+    Expect = '<= max-messages'
+    Actual = "$count 条"
+    Hit    = ($count -gt 0 -and $count -le 20)
 }
 
-$rows | Format-Table -AutoSize
+$rows | Format-Table -AutoSize -Wrap
 $pass = @($rows | Where-Object Hit).Count
 Write-Host ("命中 {0}/{1}" -f $pass, $rows.Count) -ForegroundColor Cyan
 

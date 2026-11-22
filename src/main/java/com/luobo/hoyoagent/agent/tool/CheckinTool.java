@@ -18,15 +18,18 @@ import org.springframework.stereotype.Component;
 import java.util.stream.Collectors;
 
 /**
- * 签到工具：身份同样来自 cookie，不接受任何"签谁"的参数。
+ * 签到工具：身份来自 {@link SessionRegistry} 注册的平台用户，不接受任何"签谁"的参数。
  *
- * <p>工具只负责把结果说清楚，幂等与重试都在 {@link CheckinService} 里——
- * 模型不该关心"今天是不是已经签过"，它只要照实汇报。
+ * <p>没有身份就直接拒绝，绝不回退到默认账号——匿名 HTTP 调用者不该能签 owner 的号。
  */
 @Component
 public class CheckinTool {
 
     private static final Logger log = LoggerFactory.getLogger(CheckinTool.class);
+
+    /** 没有平台身份时的统一回复。 */
+    static final String NO_IDENTITY =
+            "没有绑定米游社账号，查不到签到总览。请绑定后重试";
 
     private final ToolCallRecorder recorder;
 
@@ -51,7 +54,11 @@ public class CheckinTool {
             + "只是问「签到了吗 / 漏了几天」时不要调用本工具，改用 getCheckinOverview。"
             + "只能签当前账号，不接受指定其他玩家")
     public String checkinToday(@ToolMemoryId String memoryId) {
-        String userId = sessions.userIdOrLocal(memoryId);
+        String userId = sessions.userIdOf(memoryId).orElse(null);
+        if (userId == null) {
+            log.info("[TOOL] checkinToday 无身份会话，拒绝");
+            return NO_IDENTITY;
+        }
         log.info("[TOOL] checkinToday user={}", Mask.id(userId));
         recorder.record("checkinToday", "");
 

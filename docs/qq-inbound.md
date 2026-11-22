@@ -127,8 +127,7 @@
    （[`TextChunker`](../src/main/java/com/luobo/hoyoagent/channel/TextChunker.java)），
    剩下的等接第二个平台（TG）时一起做——用第二个实现验证抽象，别提前设计
 3. **同会话串行**：现在每条消息一个虚拟线程，同一会话连发两条可能乱序，记忆窗口按完成顺序写
-4. **P8 多账号**：`@ToolMemoryId → userId → 凭据`，这是进群的前置
-
+4. **多账号（已完成）**：`@ToolMemoryId → userId → 凭据`，每个 openid 一个账号；绑定/签到只走 QQ
 ## 9. OneBot 备选（P10）
 
 Step 0 的一次性桥 `scripts/qq-bridge/QQBridge.java` 已删除——它已经完成使命（验证了

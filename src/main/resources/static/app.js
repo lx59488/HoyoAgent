@@ -6,6 +6,14 @@
 
 const SESSION_KEY = "hoyoagent.session";
 
+/** 记忆里的消息类型 → 中文标签。 */
+const TYPE_LABEL = {
+    USER: "用户",
+    AI: "模型",
+    SYSTEM: "系统",
+    TOOL_EXECUTION_RESULT: "工具结果"
+};
+
 function newSessionId() {
     return crypto.randomUUID
         ? crypto.randomUUID()
@@ -24,49 +32,7 @@ function loadSessionId() {
 const state = {
     mode: "agent",
     sessionId: loadSessionId(),
-    ticket: null,
-    pollTimer: null,
-    tickTimer: null,
-    deadline: 0,
-    busy: false,
-    bound: false,
-    hasStoken: false,
-    messages: 0
-};
-
-const GAME_NAMES = {
-    hk4e_cn: "原神",
-    hkrpg_cn: "崩坏：星穹铁道",
-    nap_cn: "绝区零",
-    bh3_cn: "崩坏3",
-    bh2_cn: "崩坏学园2",
-    nxx_cn: "未定事件簿"
-};
-
-const QR_LABEL = {
-    CREATING: "创建中…",
-    WAITING: "等待扫码",
-    SCANNED: "已扫码，请在手机上确认",
-    BOUND: "绑定成功",
-    EXPIRED: "二维码已过期",
-    FAILED: "失败"
-};
-
-const QR_CLASS = {
-    CREATING: "pill-muted",
-    WAITING: "pill-warn",
-    SCANNED: "pill-warn",
-    BOUND: "pill-ok",
-    EXPIRED: "pill-err",
-    FAILED: "pill-err"
-};
-
-/** 后端 /api/auth/status 的 source 是 AccountService.Source 枚举（2026-11-20 起）。 */
-const SOURCE_LABEL = {
-    ACCOUNT: "账号文件",
-    LEGACY: "旧 credential.properties",
-    ENV: ".env 的 HOYO_COOKIE",
-    NONE: "无"
+    busy: false
 };
 
 const $ = (selector) => document.querySelector(selector);
@@ -79,6 +45,7 @@ async function request(path, options = {}) {
     const started = performance.now();
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), options.timeout || 150000);
+    let reached = false;
 
     const init = {
         method: options.method || "GET",
@@ -92,6 +59,9 @@ async function request(path, options = {}) {
 
     try {
         const response = await fetch(path, init);
+        reached = true;
+        setConnection(true, "已连接");
+
         const text = await response.text();
         let json = null;
         try {
@@ -110,6 +80,9 @@ async function request(path, options = {}) {
         }
         return json;
     } catch (error) {
+        if (!reached) {
+            setConnection(false, "未连接");
+        }
         if (error.name === "AbortError") {
             throw new Error("请求超时");
         }
@@ -134,337 +107,50 @@ function setConnection(ok, text) {
     el.textContent = text;
 }
 
-function setAccountPill(status) {
-    const el = $("#account-pill");
-    el.className = "pill " + (status.bound ? "pill-ok" : "pill-muted");
-    el.textContent = status.bound ? `已绑定 · ${status.uid || "未知 uid"}` : "未绑定";
-}
-
-function badge(text, ok) {
-    const el = document.createElement("span");
-    el.className = "badge" + (ok ? " ok" : "");
-    el.textContent = text;
-    return el;
-}
-
-function renderAccount(status) {
-    const box = $("#account-detail");
-    box.classList.remove("hidden");
-    box.replaceChildren();
-
-    const dl = document.createElement("dl");
-    const rows = [
-        ["userId", status.userId || "—"],
-        ["来源", SOURCE_LABEL[status.source] || status.source || "—"],
-        ["uid", status.uid || "—"],
-        ["mid", status.mid || "—"]
-    ];
-    rows.forEach(([key, value]) => {
-        const dt = document.createElement("dt");
-        dt.textContent = key;
-        const dd = document.createElement("dd");
-        dd.textContent = value;
-        dl.append(dt, dd);
-    });
-
-    const badges = document.createElement("div");
-    badges.className = "badges";
-    badges.append(
-        badge("stoken", status.hasStoken),
-        badge("ltoken", status.hasLtoken),
-        badge("ltoken_v2", status.hasLtokenV2),
-        badge("cookie_token", status.hasCookieToken)
-    );
-
-    box.append(dl, badges);
-
-    state.bound = !!status.bound;
-    state.hasStoken = !!status.hasStoken;
-    $("#btn-roles").disabled = !status.bound;
-    $("#btn-refresh").disabled = !status.hasStoken;
-}
-
-async function loadStatus() {
-    try {
-        const result = await request("/api/auth/status");
-        setConnection(true, "已连接");
-        setAccountPill(result.data);
-        renderAccount(result.data);
-        loadCheckin();
-    } catch (error) {
-        setConnection(false, "未连接");
-        $("#account-pill").className = "pill pill-muted";
-        $("#account-pill").textContent = "未知状态";
-        $("#account-detail").classList.add("hidden");
-        $("#btn-refresh").disabled = true;
-        $("#btn-roles").disabled = true;
-        showNote("读取绑定状态失败：" + error.message);
-    }
-}
-
 /* ------------------------------------------------------------------ */
-/* 扫码绑定                                                            */
+/* 会话记忆                                                            */
 /* ------------------------------------------------------------------ */
 
-function setQrState(name, remainingSeconds, message) {
-    const pill = $("#qr-state");
-    pill.className = "pill " + (QR_CLASS[name] || "pill-muted");
-    pill.textContent = QR_LABEL[name] || name;
-
-    if (typeof remainingSeconds === "number" && remainingSeconds >= 0) {
-        state.deadline = Date.now() + remainingSeconds * 1000;
-        updateCountdown();
-    }
-    if (message) {
-        $("#qr-msg").textContent = message;
-    }
-}
-
-function updateCountdown() {
-    if (!state.deadline) {
-        $("#qr-countdown").textContent = "";
-        return;
-    }
-    const left = Math.max(0, Math.ceil((state.deadline - Date.now()) / 1000));
-    const minutes = Math.floor(left / 60);
-    const seconds = String(left % 60).padStart(2, "0");
-    $("#qr-countdown").textContent = left > 0 ? `剩余 ${minutes}:${seconds}` : "已过期";
-}
-
-function startTick() {
-    clearInterval(state.tickTimer);
-    state.tickTimer = setInterval(updateCountdown, 1000);
-}
-
-function stopQr() {
-    clearTimeout(state.pollTimer);
-    clearInterval(state.tickTimer);
-    state.pollTimer = null;
-    state.tickTimer = null;
-    state.ticket = null;
-    state.deadline = 0;
-    const countdown = $("#qr-countdown");
-    if (countdown) {
-        countdown.textContent = "";
-    }
-}
-
-async function startQr() {
-    stopQr();
-    $("#qr-area").classList.remove("hidden");
-    $("#qr-img").removeAttribute("src");
-    $("#qr-msg").textContent = "正在创建二维码…";
-    setQrState("CREATING");
-    $("#btn-qr").disabled = true;
-
+async function loadMemory() {
     try {
-        const result = await request("/api/auth/qr", { method: "POST" });
-        const data = result.data;
-        state.ticket = data.ticket;
-        $("#qr-img").src = `/api/auth/qr/${encodeURIComponent(data.ticket)}/image?ts=${Date.now()}`;
-        $("#qr-msg").textContent = "用米游社 App 扫码并确认（3 分钟内有效）";
-        setQrState(data.state || "WAITING", data.expiresInSeconds);
-        startTick();
-        schedulePoll(0);
+        const result = await request(`/api/memory/${encodeURIComponent(state.sessionId)}`);
+        renderMemory(result.data || {});
     } catch (error) {
-        setQrState("FAILED", 0, "创建失败：" + error.message);
-    } finally {
-        $("#btn-qr").disabled = false;
+        $("#memory-session").textContent = state.sessionId;
+        $("#memory-meta").textContent = "读取失败：" + error.message;
+        $("#memory-list").replaceChildren();
     }
 }
 
-function schedulePoll(delay) {
-    clearTimeout(state.pollTimer);
-    state.pollTimer = setTimeout(pollQr, delay);
-}
+function renderMemory(view) {
+    $("#memory-session").textContent = view.sessionId || state.sessionId;
+    const count = typeof view.messages === "number" ? view.messages : 0;
+    $("#memory-meta").textContent = view.expired
+        ? `${count} 条 · 已空闲超时（下一轮按新会话处理）`
+        : `${count} 条 · 下一轮会原样发给模型`;
 
-async function pollQr() {
-    if (!state.ticket) {
-        return;
-    }
-    try {
-        const result = await request(`/api/auth/qr/${encodeURIComponent(state.ticket)}`);
-        const data = result.data;
-        setQrState(data.state, data.expiresInSeconds, data.message);
-
-        if (data.state === "BOUND") {
-            stopQr();
-            await loadStatus();
-            await loadRoles();
-            showNote(`绑定成功：uid ${data.uid || "?"}`);
-            return;
-        }
-        if (data.state === "EXPIRED" || data.state === "FAILED") {
-            stopQr();
-            return;
-        }
-        schedulePoll(2000);
-    } catch (error) {
-        setQrState("FAILED", 0, "轮询失败：" + error.message);
-        schedulePoll(3000);
-    }
-}
-
-async function refreshV2() {
-    $("#btn-refresh").disabled = true;
-    try {
-        const result = await request("/api/auth/refresh", { method: "POST" });
-        showNote("v2 刷新：" + result.data.message);
-        await loadStatus();
-    } catch (error) {
-        showNote("v2 刷新失败：" + error.message);
-    } finally {
-        $("#btn-refresh").disabled = !state.hasStoken;
-    }
-}
-
-async function loadRoles() {
-    const box = $("#roles-box");
-    box.classList.remove("hidden");
-    const list = $("#roles");
+    const list = $("#memory-list");
     list.replaceChildren();
-
-    const loading = document.createElement("li");
-    loading.textContent = "加载中…";
-    list.append(loading);
-
-    try {
-        const result = await request("/api/auth/roles");
-        const roles = result.data || [];
-        list.replaceChildren();
-        if (!roles.length) {
-            const empty = document.createElement("li");
-            empty.textContent = "当前账号没有绑定角色";
-            list.append(empty);
-            return;
-        }
-        roles.forEach((role) => {
-            const item = document.createElement("li");
-            const name = document.createElement("strong");
-            name.textContent = GAME_NAMES[role.gameBiz] || role.gameBiz;
-            const detail = document.createElement("span");
-            detail.textContent = `${role.nickname || "—"} · ${role.gameUid} · Lv.${role.level}`;
-            item.append(name, detail);
-            list.append(item);
-        });
-    } catch (error) {
-        list.replaceChildren();
-        const failed = document.createElement("li");
-        failed.textContent = "读取失败：" + error.message;
-        list.append(failed);
-    }
-}
-
-/* ------------------------------------------------------------------ */
-/* 每日签到                                                            */
-/* ------------------------------------------------------------------ */
-
-const OUTCOME_LABEL = { DONE: "已签", PARTIAL: "部分失败", FAILED: "失败", SKIPPED: "跳过" };
-
-const TRIGGER_LABEL = { SCHEDULED: "定时", STARTUP: "启动补签", MANUAL: "手动" };
-
-function outcomePill(outcome) {
-    switch (outcome) {
-        case "DONE":
-            return "pill-ok";
-        case "PARTIAL":
-            return "pill-warn";
-        case "FAILED":
-            return "pill-err";
-        default:
-            return "pill-muted";
-    }
-}
-
-/** 后端给的是带偏移的 ISO 串（如 2026-11-14T00:10+08:00），直接切字符串，别让浏览器再按本地时区解释一次。 */
-function formatScheduled(iso) {
-    if (!iso) {
-        return "—";
-    }
-    const match = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/.exec(iso);
-    return match ? `${match[2]}-${match[3]} ${match[4]}:${match[5]}` : iso;
-}
-
-async function loadCheckin() {
-    try {
-        const result = await request("/api/checkin/status");
-        renderCheckin(result.data);
-    } catch (error) {
-        $("#checkin-pill").className = "pill pill-err";
-        $("#checkin-pill").textContent = "读取失败";
-        $("#checkin-msg").textContent = "读取签到状态失败：" + error.message;
-    }
-}
-
-function renderCheckin(status) {
-    const pill = $("#checkin-pill");
-    const today = status.today;
-
-    if (!status.enabled) {
-        pill.className = "pill pill-muted";
-        pill.textContent = "已关闭";
-    } else if (!today) {
-        pill.className = "pill pill-warn";
-        pill.textContent = "今天未跑";
-    } else {
-        pill.className = "pill " + outcomePill(today.outcome);
-        pill.textContent = OUTCOME_LABEL[today.outcome] || today.outcome;
-    }
-
-    $("#checkin-when").textContent = status.enabled
-        ? `下次 ${formatScheduled(status.nextRun)}`
-        : "自动签到已关闭（hoyo.checkin.enabled=false）";
-
-    const message = $("#checkin-msg");
-    if (status.needsAttention) {
-        message.textContent = status.attention || "需要看一眼";
-        message.className = "hint warn";
-    } else if (today) {
-        message.textContent = `${TRIGGER_LABEL[today.trigger] || today.trigger} · ${formatScheduled(today.finishedAt)} · ${today.message}`;
-        message.className = "hint";
-    } else {
-        message.textContent = "今天还没到点；00:10 之后会自动签，也可以现在手动跑一次。";
-        message.className = "hint";
-    }
-
-    const list = $("#checkin-days");
-    list.replaceChildren();
-    const recent = status.recent || [];
-    if (!recent.length) {
+    const content = view.content || [];
+    if (!content.length) {
         const empty = document.createElement("li");
-        empty.textContent = "还没有签到记录";
+        empty.className = "mem-empty";
+        empty.textContent = "本会话还没有记忆";
         list.append(empty);
         return;
     }
-    recent.forEach((record) => {
+    content.forEach((message) => {
         const item = document.createElement("li");
-        const left = document.createElement("span");
-        const outcome = document.createElement("span");
-        outcome.className = "pill " + outcomePill(record.outcome);
-        outcome.textContent = OUTCOME_LABEL[record.outcome] || record.outcome;
-        left.append(document.createTextNode(`${(record.date || "").slice(5)} `), outcome);
-        const right = document.createElement("span");
-        right.textContent = record.message || "";
-        item.append(left, right);
+        item.className = "mem-item";
+        const type = document.createElement("span");
+        type.className = "mem-type";
+        type.textContent = TYPE_LABEL[message.type] || message.type;
+        const text = document.createElement("span");
+        text.className = "mem-text";
+        text.textContent = message.text || "";
+        item.append(type, text);
         list.append(item);
     });
-}
-
-async function runCheckin() {
-    const button = $("#btn-checkin");
-    button.disabled = true;
-    button.textContent = "签到中…";
-    try {
-        const result = await request("/api/checkin/run", { method: "POST" });
-        const record = result.data || {};
-        showNote(`签到：${OUTCOME_LABEL[record.outcome] || record.outcome} — ${record.message || ""}`);
-        await loadCheckin();
-    } catch (error) {
-        showNote("签到失败：" + error.message);
-    } finally {
-        button.disabled = false;
-        button.textContent = "现在跑一次";
-    }
 }
 
 /* ------------------------------------------------------------------ */
@@ -498,7 +184,6 @@ function addMessage(kind, text, tools = []) {
     }
 
     $("#messages").append(wrap);
-    state.messages += 1;
     scrollMessages();
 }
 
@@ -546,6 +231,9 @@ async function sendMessage(text) {
         const result = await request(`${path}?q=${encodeURIComponent(message)}`, options);
         const data = result.data || {};
         addMessage("assistant", data.reply || "（空回复）", data.toolsCalled || []);
+        if (state.mode === "agent") {
+            await loadMemory();
+        }
     } catch (error) {
         addMessage("error", "请求失败：" + error.message);
     } finally {
@@ -560,37 +248,48 @@ function autosize() {
 }
 
 /* ------------------------------------------------------------------ */
+/* 会话操作                                                            */
+/* ------------------------------------------------------------------ */
+
+async function clearSession() {
+    const button = $("#btn-clear");
+    button.disabled = true;
+    try {
+        await request(`/api/memory/${encodeURIComponent(state.sessionId)}`, { method: "DELETE" });
+        $("#messages").replaceChildren();
+        showNote("已清空本会话记忆");
+        await loadMemory();
+    } catch (error) {
+        addMessage("error", "清空失败：" + error.message);
+    } finally {
+        button.disabled = false;
+    }
+}
+
+function newSession() {
+    state.sessionId = newSessionId();
+    localStorage.setItem(SESSION_KEY, state.sessionId);
+    $("#messages").replaceChildren();
+    showNote(`新会话：${state.sessionId}`);
+    loadMemory();
+}
+
+/* ------------------------------------------------------------------ */
 /* 事件绑定                                                            */
 /* ------------------------------------------------------------------ */
 
-$("#btn-qr").addEventListener("click", startQr);
-$("#btn-status").addEventListener("click", loadStatus);
-$("#btn-refresh").addEventListener("click", refreshV2);
-$("#btn-roles").addEventListener("click", loadRoles);
-$("#btn-checkin").addEventListener("click", runCheckin);
-$("#btn-new-session").addEventListener("click", () => {
-    state.sessionId = newSessionId();
-    localStorage.setItem(SESSION_KEY, state.sessionId);
-    addMessage("note", `新会话：${state.sessionId}`);
-});
+$("#btn-memory").addEventListener("click", loadMemory);
+$("#btn-new-session").addEventListener("click", newSession);
+$("#btn-clear").addEventListener("click", clearSession);
 
 document.querySelectorAll(".seg").forEach((button) => {
     button.addEventListener("click", () => {
         document.querySelectorAll(".seg").forEach((item) => item.classList.toggle("active", item === button));
         state.mode = button.dataset.mode;
         $("#input").placeholder = state.mode === "agent"
-            ? "Agent 会调用工具，比如「帮我签个到」"
+            ? "Agent 会调用工具（需先在 QQ 里绑定账号）"
             : "纯模型问答，不调用任何工具";
     });
-});
-
-document.querySelectorAll("[data-prompt]").forEach((button) => {
-    button.addEventListener("click", () => sendMessage(button.dataset.prompt));
-});
-
-$("#btn-clear").addEventListener("click", () => {
-    $("#messages").replaceChildren();
-    state.messages = 0;
 });
 
 $("#composer").addEventListener("submit", (event) => {
@@ -607,11 +306,9 @@ $("#input").addEventListener("keydown", (event) => {
     }
 });
 
-window.addEventListener("beforeunload", stopQr);
-
 /* ------------------------------------------------------------------ */
 /* 启动                                                                */
 /* ------------------------------------------------------------------ */
 
-addMessage("note", "先绑定账号，再在右侧提问。Agent 模式会调用工具，Chat 模式只问模型；调试面板可看原始 JSON。");
-loadStatus();
+addMessage("note", "网页只用于聊天调试和查看记忆；绑定、签到都在 QQ 里完成。当前会话没有平台身份，Agent 的签到类工具会提示「没有绑定」。");
+loadMemory();

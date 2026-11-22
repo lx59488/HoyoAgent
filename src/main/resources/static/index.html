@@ -12,58 +12,24 @@
         <span class="logo">H</span>
         <div>
             <h1>HoyoAgent 调试台</h1>
-            <p>扫码绑定 · 和 Agent 对话</p>
+            <p>聊天调试 · 会话记忆</p>
         </div>
     </div>
     <div class="topbar-right">
         <span id="conn" class="pill pill-muted">连接中…</span>
-        <span id="account-pill" class="pill pill-muted">未绑定</span>
     </div>
 </header>
 
 <main class="layout">
     <section class="card">
         <div class="card-head">
-            <h2>账号绑定</h2>
-            <button id="btn-status" class="ghost" type="button">刷新状态</button>
+            <h2>会话记忆</h2>
+            <button id="btn-memory" class="ghost" type="button">刷新</button>
         </div>
-
-        <div id="account-detail" class="detail hidden"></div>
-
-        <div id="qr-area" class="qr-area hidden">
-            <div class="qr-frame">
-                <img id="qr-img" alt="米游社登录二维码">
-            </div>
-            <div class="qr-meta">
-                <span id="qr-state" class="pill pill-muted">等待扫码</span>
-                <span id="qr-countdown" class="muted"></span>
-            </div>
-            <p id="qr-msg" class="hint">用米游社 App 扫码并确认（3 分钟内有效）</p>
-        </div>
-
-        <div class="actions">
-            <button id="btn-qr" class="primary" type="button">获取登录二维码</button>
-            <button id="btn-refresh" class="secondary" type="button" disabled>刷新 v2 凭据</button>
-            <button id="btn-roles" class="ghost" type="button" disabled>查看绑定角色</button>
-        </div>
-
-        <div id="roles-box" class="roles hidden">
-            <h3>绑定角色</h3>
-            <ul id="roles"></ul>
-        </div>
-
-        <div id="checkin-box" class="roles">
-            <h3>每日签到</h3>
-            <div class="checkin-line">
-                <span id="checkin-pill" class="pill pill-muted">加载中…</span>
-                <span id="checkin-when" class="muted"></span>
-            </div>
-            <p id="checkin-msg" class="hint"></p>
-            <ul id="checkin-days"></ul>
-            <div class="actions">
-                <button id="btn-checkin" class="ghost" type="button">现在跑一次</button>
-            </div>
-        </div>
+        <p class="hint">Agent 会话的记忆窗口，也就是下一轮真正发给模型的内容。</p>
+        <p id="memory-session" class="session-id">—</p>
+        <p id="memory-meta" class="hint">—</p>
+        <ul id="memory-list" class="mem-list"></ul>
     </section>
 
     <section class="card chat">
@@ -78,10 +44,7 @@
         <div id="messages" class="messages" aria-live="polite"></div>
 
         <div class="suggestions">
-            <button type="button" data-prompt="帮我签个到">帮我签个到</button>
-            <button type="button" data-prompt="今天签到了吗">今天签到了吗</button>
-            <button type="button" data-prompt="我树脂还剩多少">我树脂还剩多少</button>
-            <button type="button" id="btn-clear" class="ghost">清空对话</button>
+            <button type="button" id="btn-clear" class="ghost">清空会话记忆</button>
             <button type="button" id="btn-new-session" class="ghost">新会话</button>
         </div>
 

@@ -20,8 +20,6 @@ langchain4j:
 hoyo:
   timeout: PT10S
   device-id: ${HOYO_DEVICE_ID:}          # 空 = 自动生成；复现已有会话时必须填抓包值
-  cookie: ${HOYO_COOKIE:}                # 兜底；扫码写入账号目录后优先用文件
-  user-id: ${HOYO_USER_ID:local}         # 单用户阶段固定 local；多用户后由平台适配器注入
   state-dir: ${HOYO_STATE_DIR:}          # 本地状态根，默认 ~/.hoyo；docker/k8s 指到挂载卷即可整体搬家
   # account-dir: ${HOYO_ACCOUNT_DIR:}    # 默认 <state-dir>/accounts（每用户一个 .account 文件）
   storage:

@@ -14,6 +14,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 class CheckinToolIdentityTest {
@@ -23,8 +24,8 @@ class CheckinToolIdentityTest {
     private static final Credential B = Credential.of("ltoken=b; ltuid=1002");
 
     @Test
-    void credentialComesFromMemoryIdOnly() {
-        SessionRegistry sessions = new SessionRegistry("local");
+    void credentialComesFromRegisteredSession() {
+        SessionRegistry sessions = new SessionRegistry();
         sessions.register("qqbot:c2c:AAA", "qq:AAA");
         sessions.register("qqbot:c2c:BBB", "qq:BBB");
 
@@ -47,17 +48,28 @@ class CheckinToolIdentityTest {
     }
 
     @Test
-    void unknownSessionRunsAsLocal() {
-        SessionRegistry sessions = new SessionRegistry("local");
+    void unknownSessionDoesNotPickAnyAccount() {
+        SessionRegistry sessions = new SessionRegistry();
         AccountService accounts = mock(AccountService.class);
-        when(accounts.requireCredential("local")).thenReturn(A);
-
         CheckinService checkin = mock(CheckinService.class);
-        when(checkin.checkinAll(A)).thenReturn(new CheckinRunResult(List.of(), "ok"));
 
         CheckinTool tool = new CheckinTool(new ToolCallRecorder(), checkin, sessions, accounts);
-        tool.checkinToday("web:whatever");
+        String reply = tool.checkinToday("web:whatever");
 
-        verify(accounts).requireCredential("local");
+        assertThat(reply).contains("没有绑定");
+        verifyNoInteractions(accounts);
+        verifyNoInteractions(checkin);
+    }
+
+    @Test
+    void oneShotSessionHasNoIdentityEither() {
+        SessionRegistry sessions = new SessionRegistry();
+        AccountService accounts = mock(AccountService.class);
+        CheckinService checkin = mock(CheckinService.class);
+
+        CheckinTool tool = new CheckinTool(new ToolCallRecorder(), checkin, sessions, accounts);
+
+        assertThat(tool.checkinToday("one-shot:abc")).contains("没有绑定");
+        verifyNoInteractions(accounts);
     }
 }

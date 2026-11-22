@@ -100,26 +100,6 @@ public class QrLoginService {
         return session;
     }
 
-    /**
-     * 用当前 stoken 静默刷新 v2 凭据（不需要手机）。
-     *
-     * <p>典型场景：签到一直正常（v1 cookie_token 就够），但查角色突然 {@code 5003}——
-     * 那就是 {@code ltoken_v2} 过期了，调一次这里即可。
-     */
-    public RefreshResult refreshV2(String ownerId) {
-        Credential current = accounts.credentialOf(ownerId).orElseThrow(() ->
-                new BusinessException(ErrorCode.MOYO_AUTH_EXPIRED, "当前账号未绑定，请先扫码"));
-        if (!current.hasStoken() || current.mid() == null || current.mid().isBlank()) {
-            throw new BusinessException(ErrorCode.MOYO_AUTH_EXPIRED, "当前凭据缺少 stoken/mid，请重新扫码绑定");
-        }
-        CookieJar v2 = passport.exchangeV2(current.stoken(), current.mid());
-        CookieJar merged = current.cookies().merge(v2);
-        Credential refreshed = current.withCookies(merged);
-        accounts.save(accounts.localUserId(), refreshed); // 同上
-        return new RefreshResult(merged.has("ltoken_v2"), merged.has("cookie_token_v2"),
-                merged.has("ltoken_v2") ? "v2 凭据已刷新" : "刷新成功，但响应里没有 ltoken_v2");
-    }
-
     private void handleOk(Session session, PassportClient.QrPoll poll) {
         String status = poll.status() == null ? "" : poll.status().toLowerCase();
         switch (status) {
@@ -202,9 +182,6 @@ public class QrLoginService {
     }
 
     public record Start(String ticket, String url, long expiresInSeconds, String state) {
-    }
-
-    public record RefreshResult(boolean hasLtokenV2, boolean hasCookieTokenV2, String message) {
     }
 
     public record Status(String ticket,
