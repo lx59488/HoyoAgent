@@ -11,11 +11,12 @@
 > **部件轴不进本文**：一个完整 agent 有哪些模块、边界怎么定、每个部件怎么验证，见
 > [`agent-architecture.md`](agent-architecture.md)；本文只负责「何时做 / 做没做」。
 
-**最后更新：2026-11-23**（①新建 [`agent-architecture.md`](agent-architecture.md)，把「agent 有哪些部件」
-这条轴从本文分出去；②本文新增「跨阶段契约 C1–C4」，P13 标注前置；③暂缓区补 4 条并写明触发条件；
-④**C3 落地**：`channel/SessionSerializer` + `QqBotDispatcher` 包住 `chat.ask`，修掉同会话并发丢轮次
-（132 条测试全绿）。11-22 的定位收宽与 HTTP 入口删除见文末维护记录。
-P9 的 3 天观察仍是 **0/3**；QQ 主线 P11 已落地但**未真机验收**）
+**最后更新：2026-11-23**（①**契约 C1–C5 全部落地**：C1-a 四段 prompt、C2 能力注册表、C3 会话串行、
+C4 `TurnTrace` + 20 条评测基线、C5 工具输出契约；②**本表回填真实状态**——此前 C1/C2 还写着「未开工」，
+而 11:27 / 12:33 / 13:11 的三个提交已经把代码落了；③139 条测试全绿（`-Dgroups=!network` 排除联网用例），
+评测基线首跑 **18/20（有效 10/12）**，两条 FAIL 都是 markdown 格式，详见文末维护记录。
+11-22 的定位收宽与 HTTP 入口删除见文末维护记录。
+P9 的 3 天观察仍是 **0/3**（凭据 11-16 起 `AUTH` 失效，要先重扫）；QQ 主线 P11 已落地但**未真机验收**）
 
 ---
 
@@ -27,11 +28,12 @@ P9 的 3 天观察仍是 **0/3**；QQ 主线 P11 已落地但**未真机验收**
 | 账号 | 账号体检（哪张票过期、上次为什么失败） | ❌ 未做 | `mihoyo/credential` |
 | 数据 | 便笺（树脂）、深渊、抽卡、公告 | ❌ 未验证 / 未做 | `mihoyo/gamerecord` 等 |
 | **知识** | **角色 / 武器 / 攻略 / 活动问答（RAG）** | **🚧 未立项（P12）** | 新域 `knowledge/` |
-| **对话** | **人设、闲聊、跨话题记忆** | **🚧 未开工（P13，前置 C1 + C4）** | `agent`（prompt 拆分见 C1） |
+| **对话** | **人设、闲聊、跨话题记忆** | **🚧 未开工（P13，前置 C1 + C4 已满足）** | `agent`（prompt 拆分见 C1） |
 | 通道 | QQ 官方机器人 / Web 调试台 / 出站通知 | ✅ | `adapter` / `channel` |
 
 > 这张表回答「项目要去哪」，P0~P11 回答「怎么走到今天」，P12/P13 是「下一步」。
-> **表里没有的能力，不要写进 SystemMessage**——工具不在、提示词先承诺，模型就会编（P3/P6 的教训）。
+> **表里没有的能力，不要写进 `<capabilities>`**（`SystemPrompt.CAPABILITIES`）——工具不在、提示词先承诺，模型就会编（P3/P6 的教训）。
+> 这一段的话现在由 `CapabilityConsistencyTest` 守着：注册表里没有的能力，测试会红。
 > 新增能力的第一件事是加到本表，第二件事才是写代码。
 >
 > 本表是**产品能力轴**（用户能做什么）。**工程部件轴**（agent 有哪些模块、缺哪些部件）不在本表——
@@ -57,7 +59,7 @@ P9 的 3 天观察仍是 **0/3**；QQ 主线 P11 已落地但**未真机验收**
 | P10 | QQ 入站（OneBot v11） | 在 QQ 私聊里对话 | 1~2 天 | ⏸️ 降级为备选：Step 0 桥已删除（git `3dcd255` 可恢复），协议代码不复用 |
 | P11 | QQ 官方机器人 | 手机 QQ 里直接对话 | 1~2 天 | 🚧 `adapter/qq` + `AgentChatService` + `TextChunker` 已落地；**未真机验收**（P11-5） |
 | P12 | 游戏知识库 | 能引用出处地回答角色/武器/攻略 | 长期 | ⬜ **未立项**：只定了边界与三个前置问题 |
-| P13 | 人设与日常对话 | 闲聊得体、不越界、不编数据 | 长期 | ⬜ **未开工**：前置 C1（拆 prompt）+ C4（评测基线） |
+| P13 | 人设与日常对话 | 闲聊得体、不越界、不编数据 | 长期 | ⬜ **未开工**；前置 C1（拆 prompt）+ C4（评测基线）已于 11-23 成立，可开工 |
 
 > **状态校准自 2026-11-07 的代码核对**：P4-5（DeviceIdProvider）、P4-12（关日志）、
 > P6 纵向切片其实都已完成，只是清单没跟上。**这份清单就是项目的单一事实来源，
@@ -67,27 +69,32 @@ P9 的 3 天观察仍是 **0/3**；QQ 主线 P11 已落地但**未真机验收**
 
 ---
 
-## 跨阶段契约 C1–C4
+## 跨阶段契约 C1–C5
 
 > 契约没有「完成」这个状态，只有「今天有没有被违反」。所以用 `C` 编号、不进 `P` 序列——
 > `P` 做完打 tag，`C` 每天都要守。细节与验证方式见 [`agent-architecture.md`](agent-architecture.md) §2。
 
 | 契约 | 约束（一句话） | 落点 | 怎么验证 | 状态 |
 |---|---|---|---|---|
-| **C1** Prompt 组装 | system prompt 固定四段 `<persona>` / `<capabilities>` / `<channel>` / `<context>`，顺序与标签不变，每段有唯一所有者 | 新包 `agent/prompt/` | `SystemPromptComposerTest`：段序、标签闭合、空段不出现、总长上限 | ⬜ 未开工 |
-| **C2** 工具治理 | 能力清单的单一真相是注册表，启动期与 `@Tool` 双向对齐；每个工具声明 `READ / WRITE / IRREVERSIBLE` | `agent/tool/Capability` + `@ToolRisk` | `CapabilityConsistencyTest`：名字集合相等 + 风险级齐全 | ⬜ 未开工 |
+| **C1** Prompt 组装 | system prompt 固定四段 `<persona>` / `<capabilities>` / `<channel>` / `<context>`，顺序与标签不变，每段有唯一所有者 | `agent/prompt/`（`SystemPrompt` + `PromptSection`） | `SystemPromptTest`：段序由枚举定 / 空段整段不输出 / 标签闭合 / 超长抛异常不截断 / `@SystemMessage` 里只剩 `{{system}}` | 🟡 骨架已落（11-23）：四段 + `VERSION=p1` + 4000 字上限；`persona` 与 `channel` 仍是空串 |
+| **C2** 工具治理 | 能力清单的单一真相是注册表，启动期与 `@Tool` 双向对齐；每个工具声明风险级 | `agent/tool/Capability` + `@Tool` | `CapabilityConsistencyTest`：注册表名字集合 = `@Tool` 名字集合 + 每个 `capability.phrase()` 必须出现在 `SystemPrompt.compose()` 里 | ✅ 已成立（11-23）；风险级目前只有 `READ / WRITE`，`IRREVERSIBLE` 等真有不可逆动作再加 |
 | **C3** 身份与会话 | 身份只在适配器构造一次并注册进 `SessionRegistry`；`uid` 永不做工具参数；同一 session 串行 | `channel/SessionSerializer` + `QqBotDispatcher` | `SessionSerializerTest`：同 session 串行 / 不同 session 并行 / 异常释放锁 | ✅ 已成立（11-23）；`/agent` 调试口故意不串行 |
-| **C4** 可观测与评测 | 每轮一条 `TurnTrace`；prompt 带版本号；改 prompt / 工具 / 模型前先跑基线 | `agent/observability/TurnTrace` + 金标集 | 一条命令出分数；日志按 `traceId` 可串 | 🟡 部分（只有工具名记录） |
+| **C4** 可观测与评测 | 每轮一条 `TurnTrace`；prompt 带版本号；改 prompt / 工具 / 模型前先跑基线 | `agent/observability/TurnTrace` + `scripts/eval/` + `scripts/eval.ps1` | 一条命令出分数（`pwsh -File scripts/eval.ps1`，明细写 `target/eval-last.json`）；日志按 `traceId` 可串 | ✅ 已成立（11-23）：20 条用例、有效 12 条；首跑 18/20（有效 10/12），分数已记进维护记录 |
+| **C5** 工具输出 | 工具只给事实，不给措辞：不写结论句、不漏内部枚举、不带 `【】` 与 markdown、推算值必须标注 | `agent/tool/*Tool.format`（`CheckinTool` / `CheckinOverviewTool`） | `ToolOutputContractTest`：无内部枚举 / 无装饰符 / 推算值带「（推算）」/ 每角色一行 | ✅ 已成立（11-23） |
 
-**为什么现在定**：这四条便宜在现在、贵在以后——它们决定后面每个模块往哪儿插。
-C1 是 prompt 的挂载点，C2 是工具的闸门，C3 是所有多用户 / 群聊能力的地基，C4 是没有它就无法验证任何改动。
+**为什么现在定**：这五条便宜在现在、贵在以后——它们决定后面每个模块往哪儿插。
+C1 是 prompt 的挂载点，C2 是工具的闸门，C3 是所有多用户 / 群聊能力的地基，C4 是没有它就无法验证任何改动，
+C5 是 C1 的下半场：prompt 那边放开了措辞，工具这边就不能再把结论写死。
 
-**已知的四处违反**（现状快照，2026-11-23）：
+**现状快照**（2026-11-23）：五条契约都不再被违反。11-23 之前记在案的四处违反，处置如下：
 
-1. `MihoyoAssistant` 是一整段 `@SystemMessage`，人设与能力混在一起，prompt 无版本号 → **违反 C1**。
-2. AUTOMATIC 接线 + 无风险级 + 无一致性测试，能力声明已漂移三次（11-07 / 11-12 / 11-13）→ **违反 C2**。
-3. `TurnWindowChatMemory.add()` 是读-改-写且无锁，`QqBotDispatcher` 每消息一虚拟线程 → 同一会话并发会丢轮次，**违反 C3**。
-4. `ToolCallRecorder` 只记工具名、只存在内存；冒烟脚本 11-22 已删 → **违反 C4**。
+1. ~~`MihoyoAssistant` 是一整段 `@SystemMessage`，人设与能力混在一起，prompt 无版本号~~ → 已拆成 `SystemPrompt.compose()` 四段，注解里只剩 `{{system}}`（C1）。
+2. ~~AUTOMATIC 接线 + 无风险级 + 无一致性测试，能力声明漂移过三次~~ → 改为 `Capability` 注册表 + 启动期一致性测试（C2）。
+3. ~~`TurnWindowChatMemory.add()` 读-改-写且无锁，同一会话并发会丢轮次~~ → 加 `SessionSerializer` 串行化（C3）。
+4. ~~`ToolCallRecorder` 只记工具名、只存在内存；冒烟脚本 11-22 已删~~ → `TurnTrace` 每轮落日志 + `scripts/eval.ps1` 金标集（C4）。
+
+**但契约成立不等于产品成立**：P9 仍是 0/3（定时签到还没连续成一格）、P11-5 未实测、基线只有 20 条
+（其中 8 条恒真，真正有判别力的 12 条）。契约保证的是「改动不会悄悄弄坏别处」，不是「功能已经能用」。
 
 ---
 
@@ -291,7 +298,7 @@ P6 接真数据时才发现一个当初没意识到的事：**假数据把「查
 
 **下一步三条的处置：**
 
-- [x] 能力边界已加 `@SystemMessage`（P6 切片时同步收窄，见 `MihoyoAssistant`）
+- [x] 能力边界已加 `@SystemMessage`（P6 切片时同步收窄，见 `MihoyoAssistant`）——11-23 起这段文字移到 `SystemPrompt.CAPABILITIES`，标注里只剩 `{{system}}`
 - [ ] 第 2 条不再适用（详情工具已下线），留作 P8 恢复多工具时再看
 - [x] 表已进回归清单 → 但**以新契约重写**，不是照抄旧期望值
 
@@ -739,16 +746,18 @@ Get-ChildItem "$HOME\.hoyo\checkin" -Recurse -Filter *.json |
 
 ---
 
-## P13 · 人设与日常对话（未开工，前置：C1 + C4）
+## P13 · 人设与日常对话（未开工；前置 C1 + C4 已于 11-23 满足）
 
-**现状**：`MihoyoAssistant` 的 `@SystemMessage` 只有**能力声明**，没有**人设**。
+**现状**（2026-11-23）：`SystemPrompt.compose()` 已经把 prompt 拆成四段，但
+`<persona>` 与 `<channel>` 还是空串——四段里真正有内容的只有 `<capabilities>`。
 能力声明随工具变（改错就会承诺做不到的事，见 11-12 那次冒烟）、人设要稳定，
-两者混在一段文本里，加新能力时必然互相牵制。
+两者混在一段文本里，加新能力时必然互相牵制；现在容器有了，内容还是空的。
 
-**开工前置（不属于这一步，但必须先有）**：
+**开工前置（不属于这一步，但必须先有）**：**两个前置已于 11-23 满足**，可以开工。
+但注意：**改完人设必须重跑 `pwsh -File scripts/eval.ps1` 并把分数记进维护记录**，否则等于没做。
 
-- **C1**（Prompt 组装）：先把提示词拆成 `<persona>` / `<capabilities>`，否则这里每加一句都在加深耦合；
-- **C4**（可观测与评测）：先有能跑出分数的基线，否则改完人设无法归因——**这是 P3 的老教训：
+- **C1**（Prompt 组装）：✅ 已拆成 `<persona>` / `<capabilities>` / `<channel>` / `<context>` 四段；
+- **C4**（可观测与评测）：✅ `TurnTrace` + 20 条金标集已能一条命令跑出分数——**这是 P3 的老教训：
   改完必须有跑批，否则"改了感觉更好"不算结论。**
 
 **这一步只做三件事**：
@@ -969,6 +978,27 @@ java -jar target\HoyoAgent-0.0.1-SNAPSHOT.jar "--spring.config.import=optional:f
 
 **维护记录**
 
+- 2026-11-23 契约 C1–C5 收口 + 评测基线首跑（**有代码变更**：C5；139 条测试全绿）：
+  1) **C5 工具输出契约**（commit `e3dfb99`）：`CheckinTool` / `CheckinOverviewTool` 去掉 `【结论】/【数据】`，
+     内部枚举翻成人话（`SIGNED`→新签成功、`ALREADY`→今天已签、`FIRST_BIND`→首次绑定今天不用签、
+     `CAPTCHA`→需要人机验证、`DONE`→全部成功、`SCHEDULED`→定时任务），漏签天数标「（推算）」。
+     **理由**：工具输出会原样进上下文，模型倾向照抄，Java 里的措辞等于绕过 prompt 把语气写死。
+     另一处改动：`recorder.record` 提到身份判断**之前**——被拒的调用也要记，否则基线看不到「本该调却没调」。
+     新增 `ToolOutputContractTest` 4 条（无内部枚举 / 无装饰符 / 推算值标注 / 每角色一行），只查形状不查文案。
+  2) **文档回填**：本文契约表补齐 C1–C5 真实状态（此前 C1/C2 还写着「未开工」）；「已知的四处违反」改成
+     现状快照 + 各自处置；`agent-architecture.md` §1 五处状态、§2 标题与 C1/C2/C4 的「现在违反」、新增 C5 小节、
+     §3 验证表；README 校准日期。**C5 此前在文档里完全不存在**，是这次补的第三份落点。
+  3) **评测基线首跑**：`pwsh -File scripts/eval.ps1` → **18/20 通过（90%）**，有效 12 条里 **10/12**，
+     恒真 8 条不计入证据。明细在 `target/eval-last.json`。
+     - 工具选择 10/10 全对：4 条「帮我签」都只调 `checkinToday`，6 条「签了吗 / 漏几天」都只调 `getCheckinOverview`，
+       没有互相误用——C1-a 里「执行 vs 查看」那段分工确实生效了。
+     - **唯一的 FAIL 都是格式**：`fmt-01 你能做什么`（330 字）/ `fmt-02 你是谁`（301 字）用了 `**加粗**` 和编号列表，
+       长度都没超限。原因不是模型不克制，而是 **`<channel>` 段是空串**——没人告诉它 QQ 不渲染 markdown。
+       这正好是 C1-b 的第一个证据：**填 `<channel>` 前后各跑一次，看这两条能不能翻绿**。
+  4) **仍未做**：`PERSONA` / `CHANNEL` 还是空串（P13 / C1-b）；`TurnTrace` 无单测；没有 `IRREVERSIBLE` 风险级；
+     用例只有 20 条（有效 12）；`/agent` 调试口仍不串行。
+  5) **测试数口径**：`.\mvnw.cmd -B -ntp test "-Dgroups=!network"` = **139 条**；
+     11-23 早些时候的 147 含临时评测类，不作为基线。
 - 2026-11-23 C3 落地（**有代码变更**，132 条测试全绿）：
   1) 新增 `channel/SessionSerializer`：64 条带 `ReentrantLock`；`Math.floorMod` 取模（`hashCode()` 可能为负，
      用 `%` 会直接越界）；异常走 `finally` 释放；入口 `call(Supplier)` / `run(Runnable)`。
