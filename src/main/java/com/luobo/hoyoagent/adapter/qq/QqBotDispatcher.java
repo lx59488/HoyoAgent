@@ -1,11 +1,11 @@
 package com.luobo.hoyoagent.adapter.qq;
 
-import com.luobo.hoyoagent.common.log.Mask;
-
 import com.luobo.hoyoagent.agent.AgentChatService;
 import com.luobo.hoyoagent.channel.SessionRegistry;
+import com.luobo.hoyoagent.channel.SessionSerializer;
 import com.luobo.hoyoagent.channel.TextChunker;
 import com.luobo.hoyoagent.common.exception.BusinessException;
+import com.luobo.hoyoagent.common.log.Mask;
 import com.luobo.hoyoagent.mihoyo.auth.QrLoginService;
 import com.luobo.hoyoagent.mihoyo.binding.BindingService;
 import com.luobo.hoyoagent.mihoyo.credential.AccountService;
@@ -34,6 +34,12 @@ public class QqBotDispatcher {
 
     private final AccountService accounts;
 
+    /**
+     * 同一会话串行（C3）：两条并发消息会各自读同一份记忆再写回，后写的覆盖先写的。
+     * 包住的是整段 {@code chat.ask}，不是只包 memory 的读写——一轮的读、工具调用、写回必须是一个整体。
+     */
+    private final SessionSerializer serializer;
+
     /** 一条消息一个虚拟线程：Agent 一轮 5~20 秒，不能堵住 WS 读循环。 */
     private final ExecutorService workers = Executors.newVirtualThreadPerTaskExecutor();
 
@@ -46,13 +52,15 @@ public class QqBotDispatcher {
     };
 
     public QqBotDispatcher(QqBotProperties props, QqBotApi api, AgentChatService chat,
-                           SessionRegistry sessions, BindingService binding, AccountService accounts) {
+                           SessionRegistry sessions, BindingService binding, AccountService accounts,
+                           SessionSerializer serializer) {
         this.props = props;
         this.api = api;
         this.chat = chat;
         this.sessions = sessions;
         this.binding = binding;
         this.accounts = accounts;
+        this.serializer = serializer;
     }
 
     public void onEvent(String type, JsonNode d) {
@@ -102,7 +110,7 @@ public class QqBotDispatcher {
         }
             String reply;
         try {
-            reply = chat.ask(sessionId, text).reply();
+            reply = serializer.call(sessionId, () -> chat.ask(sessionId, text).reply());
         } catch (Exception e) {
             log.warn("[QQ] Agent 调用失败：{}", e.toString());
             reply = "【出错了】" + describe(e);

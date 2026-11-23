@@ -11,9 +11,10 @@
 > **部件轴不进本文**：一个完整 agent 有哪些模块、边界怎么定、每个部件怎么验证，见
 > [`agent-architecture.md`](agent-architecture.md)；本文只负责「何时做 / 做没做」。
 
-**最后更新：2026-11-23**（三件事，**无代码变更**：①新建 [`agent-architecture.md`](agent-architecture.md)，
-把「agent 有哪些部件」这条轴从本文分出去；②本文新增「跨阶段契约 C1–C4」，P13 标注前置；
-③暂缓区补 4 条并写明触发条件。11-22 的定位收宽与 HTTP 入口删除见文末维护记录。
+**最后更新：2026-11-23**（①新建 [`agent-architecture.md`](agent-architecture.md)，把「agent 有哪些部件」
+这条轴从本文分出去；②本文新增「跨阶段契约 C1–C4」，P13 标注前置；③暂缓区补 4 条并写明触发条件；
+④**C3 落地**：`channel/SessionSerializer` + `QqBotDispatcher` 包住 `chat.ask`，修掉同会话并发丢轮次
+（132 条测试全绿）。11-22 的定位收宽与 HTTP 入口删除见文末维护记录。
 P9 的 3 天观察仍是 **0/3**；QQ 主线 P11 已落地但**未真机验收**）
 
 ---
@@ -75,7 +76,7 @@ P9 的 3 天观察仍是 **0/3**；QQ 主线 P11 已落地但**未真机验收**
 |---|---|---|---|---|
 | **C1** Prompt 组装 | system prompt 固定四段 `<persona>` / `<capabilities>` / `<channel>` / `<context>`，顺序与标签不变，每段有唯一所有者 | 新包 `agent/prompt/` | `SystemPromptComposerTest`：段序、标签闭合、空段不出现、总长上限 | ⬜ 未开工 |
 | **C2** 工具治理 | 能力清单的单一真相是注册表，启动期与 `@Tool` 双向对齐；每个工具声明 `READ / WRITE / IRREVERSIBLE` | `agent/tool/Capability` + `@ToolRisk` | `CapabilityConsistencyTest`：名字集合相等 + 风险级齐全 | ⬜ 未开工 |
-| **C3** 身份与会话 | 身份只在适配器解析一次；`uid` 永不做工具参数；同一 session 串行 | `channel/RequestContext` + `SessionSerializer` | 并发测试：同 session 串行、不丢轮次 | 🟡 部分（记忆层有，串行没有） |
+| **C3** 身份与会话 | 身份只在适配器构造一次并注册进 `SessionRegistry`；`uid` 永不做工具参数；同一 session 串行 | `channel/SessionSerializer` + `QqBotDispatcher` | `SessionSerializerTest`：同 session 串行 / 不同 session 并行 / 异常释放锁 | ✅ 已成立（11-23）；`/agent` 调试口故意不串行 |
 | **C4** 可观测与评测 | 每轮一条 `TurnTrace`；prompt 带版本号；改 prompt / 工具 / 模型前先跑基线 | `agent/observability/TurnTrace` + 金标集 | 一条命令出分数；日志按 `traceId` 可串 | 🟡 部分（只有工具名记录） |
 
 **为什么现在定**：这四条便宜在现在、贵在以后——它们决定后面每个模块往哪儿插。
@@ -968,6 +969,16 @@ java -jar target\HoyoAgent-0.0.1-SNAPSHOT.jar "--spring.config.import=optional:f
 
 **维护记录**
 
+- 2026-11-23 C3 落地（**有代码变更**，132 条测试全绿）：
+  1) 新增 `channel/SessionSerializer`：64 条带 `ReentrantLock`；`Math.floorMod` 取模（`hashCode()` 可能为负，
+     用 `%` 会直接越界）；异常走 `finally` 释放；入口 `call(Supplier)` / `run(Runnable)`。
+  2) `QqBotDispatcher` 用 `serializer.call(sessionId, ...)` 包住**整段** `chat.ask`——包的是
+     「读记忆 + 工具调用 + 写回」这个整体，不是只包 memory 的读写。
+  3) 新增 `SessionSerializerTest` 4 条（同会话串行 / 不同会话并行 / 异常释放锁 / null 容忍）；
+     类级 `@Timeout` 让"锁泄漏"表现为**失败**而不是挂住。
+  4) **核对后推翻上一版文档的说法**：身份并非"三处各拼"，只在适配器构造一次并注册进 `SessionRegistry`，
+     所以**不做** `RequestContext`（那会是第二条身份通路）。C3 的前两条本来就成立，落地时只缺第三条。
+  5) 已知例外：`/agent` 调试口同一 session 未串行——故意，单人顺序使用；它变成真实入口时再收口。
 - 2026-11-23 新增部件轴（**无代码变更**）：
   1) 新建 `docs/agent-architecture.md`：23 个模块 × 4 层（编排 / 认知 / 治理 / 工程）+ 跨阶段契约
      C1–C4 + 每个部件的验证方式 + 推迟清单（只写触发条件）+ 与 AstrBot 的模块对照。

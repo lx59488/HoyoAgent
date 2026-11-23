@@ -40,7 +40,7 @@
 | 模块 | 状态 | 落点 | 缺什么 | 归属 |
 |---|---|---|---|---|
 | 入站适配 | ✅ | `adapter/http`、`adapter/qq` | — | P11 |
-| 身份解析（会话→用户→凭据） | 🟡 | `channel/SessionRegistry`、`@MemoryId` | 缺统一 `RequestContext`，身份在三处各拼一次 | C3 |
+| 身份解析（会话→用户→凭据） | ✅ | `channel/SessionRegistry`（适配器注册，工具按 `@ToolMemoryId` 反查） | — 刻意不做 `RequestContext`：只有一个消费者时它是多余的中间层 | C3 |
 | **Prompt 组装** | ⬜ | 未建 `agent/prompt/` | 无分段、无版本、改一个字要重编译 | **C1** |
 | 模型路由与降级 | ⬜ | 单 `ChatModel` bean | 无 provider 抽象、无 fallback | §4 |
 | 工具注册与选择 | 🟡 | AUTOMATIC 接线，2 个工具 | 无注册表、无风险级、无一致性测试 | **C2** |
@@ -76,7 +76,7 @@
 | 评测 | 🟡 | 方法论很强（P3 / `DecoyTool`），脚本已删 | 无一条命令能跑起来的基线 | **C4** |
 | 配置与实验 | 🟡 | `.env` + `application.yml` | prompt 无版本号、无 feature flag | §4 |
 | 持久化 | ✅ | 三套 file store | 无 schema 版本，格式一变旧文件读不了 | P8 |
-| 并发一致性 | 🟡 | 每消息一虚拟线程；调度器有 `ReentrantLock` | 同一 session 无串行化 | C3 |
+| 并发一致性 | ✅ | `channel/SessionSerializer`（64 条带）+ `QqBotDispatcher` 包住 `chat.ask` | —；`/agent` 调试口故意不串行（单人顺序使用，不是用户入口） | C3 |
 
 ---
 
@@ -132,17 +132,21 @@
 
 **约束**：
 
-1. 身份只在**适配器**解析一次，向下传只读的 `RequestContext(sessionId, userId, channel, now, traceId)`。
+1. 身份只在**适配器**构造一次，注册进 `SessionRegistry`，其余各层按 `@ToolMemoryId` 反查
+   （2026-11-23 核对：这一条**已成立**）。**刻意不做 `RequestContext`**：只有一个消费者时它只是多开一条
+   身份通路，反而可能与注册表分叉；等第二个入站适配器出现再评估。
 2. `uid` / `userId` **永不作为工具参数**（`mihoyo-auth.md` §7）。工具只通过 `@ToolMemoryId` 拿会话键，再经 `SessionRegistry` 换 userId。
 3. **同一 sessionId 的请求串行执行。** 一轮 5~20 秒，用户连发两条必然重叠。
 
 **为什么第 3 条是契约不是优化**：`TurnWindowChatMemory.add()` 是「读 → 加一条 → 写回」（`getMessages` 后 `updateMessages`），没有任何锁；`QqBotDispatcher` 是每条消息一个虚拟线程。两条并发消息会各自读到同一份 20 条、各自 +1 写回，**后写的覆盖先写的**——不报错，只是模型无故失忆一格。
 
-**落点**：`channel/RequestContext` + `channel/SessionSerializer`（striped lock 即可，十行）+ `QqBotDispatcher` 改用它。
+**落点**：只差 `channel/SessionSerializer`（条带锁，约 70 行含注释）+ `QqBotDispatcher` 用它包住 `chat.ask`。
+**不要**在这里顺手引入 `RequestContext`——那是第二条身份通路，不是这个问题的一部分。
 
 **验证**：`SessionSerializerTest` —— 同 key 两线程并发时第二个必须等第一个；不同 key 不互斥。加上 `TurnWindowChatMemory` 的并发读写测试。
 
-**现在违反**：`RequestContext` 不存在；`TurnWindowChatMemory.add()` 无锁保护；`ROADMAP` 的 P11 Step 1 把「同会话串行」当成重构待办，实际它是正确性问题。
+**现在违反**：无（2026-11-23 收口）——`SessionSerializer` 包住了整段 `chat.ask`，同会话并发不再互相覆盖。
+唯一例外是 `/agent` 调试口：同一 session 并发仍不串行，**故意**不包（单人顺序使用；它变成真实入口时再收口）。
 
 ---
 
@@ -170,7 +174,7 @@
 |---|---|
 | Prompt 组装 | `SystemPromptComposerTest`：段顺序 / 标签闭合 / 空段 / 总长度上限 |
 | 工具治理 | `CapabilityConsistencyTest`：注册表 ↔ `@Tool` 双向相等 + 每个工具有风险级 |
-| 身份与会话 | 并发测试：同 session 串行、不同 session 并行；`TurnWindowChatMemory` 并发不丢轮次 |
+| 身份与会话 | `SessionSerializerTest`（4 条，已落地）：同 session 串行 / 不同 session 并行 / 异常释放锁 / null 容忍 |
 | 短期记忆 | 已有 `TurnWindowChatMemoryTest` / `SessionMemoryStoreTest` / `SessionMemoryStorePersistenceTest` |
 | 评测基线 | 金标集 ≥ 20 条，一条命令出分数，分数记账到 `ROADMAP` 维护记录 |
 | 事实约束 | 能力外提问 ≥ 5 条，全部回答「无法查询」且不调工具（`DecoyTool` 下跑才有信息量） |
