@@ -46,13 +46,13 @@ public class CheckinOverviewTool {
             用户要求「帮我签到」「帮我领原石」时不要用本工具，改用 checkinToday。
             """)
     public String getCheckinOverview(@ToolMemoryId String memoryId) {
+        recorder.record("getCheckinOverview", "");
         String userId = sessions.userIdOf(memoryId).orElse(null);
         if (userId == null) {
             log.info("[TOOL] getCheckinOverview 无身份会话，拒绝");
             return NO_IDENTITY;
         }
         log.info("[TOOL] getCheckinOverview user={}", Mask.id(userId));
-        recorder.record("getCheckinOverview", "");
         try {
             // 用 find 而不是 require：未绑定时要回"友好总览"，不是抛异常
             return format(service.overview(userId, accounts.credentialOf(userId).orElse(null)));

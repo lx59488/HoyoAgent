@@ -1,9 +1,6 @@
 package com.luobo.hoyoagent.agent;
 
-import dev.langchain4j.service.MemoryId;
-import dev.langchain4j.service.SystemMessage;
-import dev.langchain4j.service.UserMessage;
-import dev.langchain4j.service.V;
+import dev.langchain4j.service.*;
 import dev.langchain4j.service.memory.ChatMemoryAccess;
 import dev.langchain4j.service.spring.AiService;
 
@@ -24,7 +21,7 @@ public interface MihoyoAssistant extends ChatMemoryAccess {
      * 模型直接拒绝用户；2026-11-13 删了角色工具、提示词还留着。
      */
     @SystemMessage("{{system}}")
-    String chat(@MemoryId String sessionId,
-                @V("system") String system,
-                @UserMessage String userMessage);
+    Result<String> chat(@MemoryId String sessionId,
+                        @V("system") String system,
+                        @UserMessage String userMessage);
 }

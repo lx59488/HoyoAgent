@@ -53,13 +53,13 @@ public class CheckinTool {
             + "只是问「签到了吗 / 漏了几天」时不要调用本工具，改用 getCheckinOverview。"
             + "只能签当前账号，不接受指定其他玩家")
     public String checkinToday(@ToolMemoryId String memoryId) {
+        recorder.record("checkinToday", "");
         String userId = sessions.userIdOf(memoryId).orElse(null);
         if (userId == null) {
             log.info("[TOOL] checkinToday 无身份会话，拒绝");
             return NO_IDENTITY;
         }
         log.info("[TOOL] checkinToday user={}", Mask.id(userId));
-        recorder.record("checkinToday", "");
 
         CheckinRunResult summary;
         try {
