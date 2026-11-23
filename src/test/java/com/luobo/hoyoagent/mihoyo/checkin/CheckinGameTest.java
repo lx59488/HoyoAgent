@@ -51,4 +51,22 @@ class CheckinGameTest {
         assertThat(CheckinGame.of("hkrpg_cn")).contains(CheckinGame.STAR_RAIL);
         assertThat(CheckinGame.of("bh3_cn")).isEmpty();
     }
+
+    /** 工具参数走 {@link CheckinGame#parse}：用户嘴里的名字、英文、gameBiz 都要认。 */
+    @Test
+    void parseAcceptsUserFacingNames() {
+        assertThat(CheckinGame.parse("原神")).contains(CheckinGame.GENSHIN);
+        assertThat(CheckinGame.parse("星铁")).contains(CheckinGame.STAR_RAIL);
+        assertThat(CheckinGame.parse("崩坏：星穹铁道")).contains(CheckinGame.STAR_RAIL);
+        assertThat(CheckinGame.parse("绝区零")).contains(CheckinGame.ZZZ);
+        assertThat(CheckinGame.parse("hsr")).contains(CheckinGame.STAR_RAIL);
+        assertThat(CheckinGame.parse("hkrpg_cn")).contains(CheckinGame.STAR_RAIL);
+    }
+
+    @Test
+    void parseRejectsBlankAndUnknown() {
+        assertThat(CheckinGame.parse(null)).isEmpty();
+        assertThat(CheckinGame.parse("  ")).isEmpty();
+        assertThat(CheckinGame.parse("崩坏3")).isEmpty();
+    }
 }

@@ -48,6 +48,14 @@ public class CheckinService {
     }
 
     public CheckinRunResult checkinAll(Credential credential) {
+        return checkinAll(credential, null);
+    }
+
+    /**
+     * @param only {@code null} 表示当前账号下所有支持的游戏；否则只签这一个游戏。
+     *             调度器永远传 {@code null}，只有工具层会指定单个游戏。
+     */
+    public CheckinRunResult checkinAll(Credential credential, CheckinGame only) {
         List<GameRole> roles;
         try {
             roles = roleService.roles(credential);
@@ -57,16 +65,17 @@ public class CheckinService {
 
         List<GameRole> supported = roles.stream()
                 .filter(r -> CheckinGame.of(r.gameBiz()).isPresent())
+                .filter(r -> only == null || only.gameBiz().equals(r.gameBiz()))
                 .toList();
         if (supported.isEmpty()) {
-            return new CheckinRunResult(List.of(), "当前账号没有可签到的角色（原神/星铁/绝区零）");
+            return new CheckinRunResult(List.of(), only == null
+                    ? "当前账号没有可签到的角色（原神/星铁/绝区零）"
+                    : "当前账号没有绑定" + only.displayName() + "的角色");
         }
 
         List<CheckinRoleResult> results = new ArrayList<>();
         for (int i = 0; i < supported.size(); i++) {
-            GameRole role = supported.get(i);
-            CheckinGame game = CheckinGame.of(role.gameBiz()).orElseThrow();
-            results.add(checkinOne(credential, game, role));
+            results.add(checkinGame(credential, supported.get(i)));
             if (i < supported.size() - 1) {
                 pause();
             }
@@ -74,7 +83,30 @@ public class CheckinService {
         return new CheckinRunResult(results, summarize(results));
     }
 
-    private CheckinRoleResult checkinOne(Credential credential, CheckinGame game, GameRole role) {
+    /**
+     * 签一个游戏。给批量流程、单游戏调用和测试共用。
+     *
+     * <p>任何运行时异常都收敛成一条 {@code FAILED} 结果：一个游戏的数据解析炸了，
+     * 不该把另外两个游戏的结论一起吞掉（调度器只会在账号层面记一笔「签到异常」）。
+     */
+    public CheckinRoleResult checkinGame(Credential credential, GameRole role) {
+        CheckinGame game = CheckinGame.of(role.gameBiz())
+                .orElseThrow(() -> new IllegalArgumentException("不支持的游戏: " + role.gameBiz()));
+        try {
+            return attemptCheckin(credential, game, role);
+        } catch (RuntimeException e) {
+            log.warn("签到异常: {} uid={}", game.displayName(), role.gameUid(), e);
+            ErrorKind kind = e instanceof BusinessException be ? kindOf(be) : ErrorKind.UNKNOWN;
+            return new CheckinRoleResult(game.gameBiz(), game.displayName(), role.gameUid(), role.region(),
+                    "FAILED", "签到异常：" + detailOf(e), 0, "", kind);
+        }
+    }
+
+    private static String detailOf(RuntimeException e) {
+        return e.getMessage() == null ? e.toString() : e.getMessage();
+    }
+
+    private CheckinRoleResult attemptCheckin(Credential credential, CheckinGame game, GameRole role) {
         MihoyoResult result = luna.info(credential, game, role.region(), role.gameUid());
         if (!result.ok()) {
             return fail(game, role, result.error(), 0);

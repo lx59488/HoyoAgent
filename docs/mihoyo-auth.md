@@ -508,6 +508,8 @@ GET  {host}/event/luna/home?lang=zh-cn&act_id=..     ← 奖励名（可选，�
 
 > 上表中的 `AuthController` / `CheckinController` / `login-qr.ps1` 已于 2026-11-22 删除（见 §13），
 > 保留这几行只为记录当时的落点；不要照着它去找文件。
+> 2026-11-23 增补：`checkinToday` / `getCheckinOverview` 增加可选 `game` 参数（仍无身份参数）；
+> 上表保持 11-12 的落点。
 
 ### 已实测通过（本机，2026-11-12）
 

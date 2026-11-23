@@ -47,6 +47,14 @@ public class CheckinOverviewService {
     }
 
     public CheckinOverview overview(String userId, Credential credential) {
+        return overview(userId, credential, null);
+    }
+
+    /**
+     * @param only {@code null} 表示当前账号下所有支持的游戏；否则只读这一个游戏。
+     *             「最近 7 天」仍然是整个账号的记录，不随 {@code only} 过滤。
+     */
+    public CheckinOverview overview(String userId, Credential credential, CheckinGame only) {
         LocalDate today = LocalDate.now(zone);
         String todayText = today.toString();
 
@@ -65,9 +73,12 @@ public class CheckinOverviewService {
 
         List<GameRole> supported = roles.stream()
                 .filter(r -> CheckinGame.of(r.gameBiz()).isPresent())
+                .filter(r -> only == null || only.gameBiz().equals(r.gameBiz()))
                 .toList();
         if (supported.isEmpty()) {
-            return new CheckinOverview("当前账号没有可签到的角色（原神/星铁/绝区零）",
+            return new CheckinOverview(only == null
+                    ? "当前账号没有可签到的角色（原神/星铁/绝区零）"
+                    : "当前账号没有绑定" + only.displayName() + "的角色",
                     List.of(), recent(userId), todayText);
         }
 
