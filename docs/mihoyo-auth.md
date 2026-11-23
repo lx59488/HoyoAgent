@@ -5,6 +5,11 @@
 > **2026-11-22 起单用户 `local` 账号删除**：没有 `HOYO_COOKIE` / `credential.properties` 兜底，
 > 绑定唯一入口是 QQ 机器人。
 > 参考实现：[FufuLauncher](https://github.com/FufuLauncher/FufuLauncher)（MIT，C#），本文只提取事实，不复制代码。
+>
+> **本文是米游社子系统文档，不定义项目整体定位**（整体定位见根目录 `README.md` 与
+> `docs/ROADMAP.md` 顶部）。文中 §4/§12 提到的 `POST /api/auth/qr`、`POST /api/checkin`、
+> `/api/auth/refresh`、`scripts/login-qr.ps1` 等 HTTP 入口**已于 2026-11-22 随控制器删除**，
+> 现行入口是 QQ 机器人；保留它们只为记录协议事实与当时的实现落点。
 
 ---
 
@@ -190,10 +195,11 @@ Cookie: mid=<mid>; stoken=<stoken>; stuid=<uid>
 
 **A 和 B 是硬前置**，C~E 可以并行。
 
-> A 的入口（已实现）：
-> `POST /api/auth/qr` → `GET /api/auth/qr/{ticket}/image`（PNG）→ `GET /api/auth/qr/{ticket}` 轮询。
-> 成功后写 `~/.hoyo/credential.properties`，启动时优先于 `.env`（因为它带 stoken）。
-> v2 续期不需要扫码：`POST /api/auth/refresh`。
+> A 的入口（**2026-11-22 起只在 QQ 里**）：
+> 私聊机器人发「绑定」→ 机器人回二维码 PNG → 平台轮询 → `BOUND`。
+> 成功后写 `~/.hoyo/accounts/<sha256(userId)[0:16]>.account`，按平台 userId 隔离。
+> 原 `POST /api/auth/qr` / `POST /api/auth/refresh` 已随 `AuthController` 删除；
+> 建码/轮询/换票的协议事实仍在 §3，那是 `PassportClient` 的实现依据。
 
 ---
 
@@ -428,7 +434,8 @@ GET  {host}/event/luna/home?lang=zh-cn&act_id=..     ← 奖励名（可选，�
 | 星铁 `103871907` | 代码 `SIGNED` | 「星琼」x20 | 5 |
 | 绝区零 `15911914` | 代码 `SIGNED` | 「菲林」x20 | 5 |
 
-幂等已验证：同一天再调 `POST /api/checkin` 只返回"已签"，不会重复签。
+幂等已验证：同一天再发起签到（当时走 `POST /api/checkin`，现在走 QQ 里的「帮我签到」）
+只返回"已签"，不会重复签。
 
 ---
 
@@ -498,6 +505,9 @@ GET  {host}/event/luna/home?lang=zh-cn&act_id=..     ← 奖励名（可选，�
 | `adapter/http/AuthController.java` | 建码 / 轮询 / PNG / `GET /api/auth/status` / `roles` / `POST /api/auth/refresh` |
 | `adapter/http/CheckinController.java` | `POST /api/checkin`（手动触发） |
 | `scripts/login-qr.ps1` | 一条命令走完：建码 → 存 PNG → 轮询到 BOUND |
+
+> 上表中的 `AuthController` / `CheckinController` / `login-qr.ps1` 已于 2026-11-22 删除（见 §13），
+> 保留这几行只为记录当时的落点；不要照着它去找文件。
 
 ### 已实测通过（本机，2026-11-12）
 

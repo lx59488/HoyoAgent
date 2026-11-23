@@ -1,12 +1,36 @@
-# HoyoAgent 学习路线与任务清单
+# HoyoAgent 路线图与任务清单
 
-> 目标：以「米游社 Agent 工具」为载体，学习 Agent 开发。
+> **项目定位：一个跑在自己机器上的米哈游系游戏助手。签到是第一个能力，不是终点；
+> 下一步是游戏知识库，再往后是能把日常聊起来的对话。** 名字里的 Hoyo 是承诺——主线只做米哈游系游戏。
+>
+> 本文是**路线图 + 决策记录**：既回答「怎么走到今天」，也回答「下一步长什么样」。
+> 子系统文档（`mihoyo-auth` / `qq-inbound` / `tool-ideas`）只描述自己那一块，**不定义项目定位**。
 > 用法：从上往下做，每完成一条把 `[ ]` 改成 `[x]`。每个阶段结束后打一个 git tag（`phase-1`、`phase-2`…）。
-> 设计原则：**先用假数据学 Agent，再接真实 API**。两条线并行、互不阻塞。
+> 设计原则：**先用假数据学 Agent，再接真实 API**；**能力靠加工具扩展，不靠改定位**——
+> 加知识库或闲聊不应该动已有的包边界（见「四条边界」）。
 
-**最后更新：2026-11-22**（删除 local 账号：`hoyo.user-id` / `HOYO_COOKIE` / 旧 `credential.properties`
-兜底、`AuthController` 与 `CheckinController` 全部移除；Web 只保留聊天调试 + 会话记忆，
-绑定与签到只在 QQ 里完成。见文末维护记录；P9 的 3 天观察仍是 **0/3**；QQ 主线 P11 已落地但**未真机验收**）
+**最后更新：2026-11-22**（同日两件事：①删除 local 账号，`hoyo.user-id` / `HOYO_COOKIE` / 旧
+`credential.properties` 兜底、`AuthController` 与 `CheckinController` 全部移除，Web 只保留聊天调试 +
+会话记忆，绑定与签到只在 QQ 里完成；②**文档校准**：定位从「米游社签到工具 / 学习项目」收宽为
+「米哈游系游戏助手」，并修掉 P9~P11 与附录 B 里指向已删除 HTTP 入口 / 脚本的命令。
+P9 的 3 天观察仍是 **0/3**；QQ 主线 P11 已落地但**未真机验收**）
+
+---
+
+## 能力地图（项目要去哪）
+
+| 层 | 能力 | 状态 | 代码落点 |
+|---|---|---|---|
+| 账号 | 每日签到（三游戏）、签到总览 | ✅ | `mihoyo/checkin` + `agent/tool` |
+| 账号 | 账号体检（哪张票过期、上次为什么失败） | ❌ 未做 | `mihoyo/credential` |
+| 数据 | 便笺（树脂）、深渊、抽卡、公告 | ❌ 未验证 / 未做 | `mihoyo/gamerecord` 等 |
+| **知识** | **角色 / 武器 / 攻略 / 活动问答（RAG）** | **🚧 未立项（P12）** | 新域 `knowledge/` |
+| **对话** | **人设、闲聊、跨话题记忆** | **🚧 未开工（P13）** | `agent`（SystemMessage 拆两段） |
+| 通道 | QQ 官方机器人 / Web 调试台 / 出站通知 | ✅ | `adapter` / `channel` |
+
+> 这张表回答「项目要去哪」，P0~P11 回答「怎么走到今天」，P12/P13 是「下一步」。
+> **表里没有的能力，不要写进 SystemMessage**——工具不在、提示词先承诺，模型就会编（P3/P6 的教训）。
+> 新增能力的第一件事是加到本表，第二件事才是写代码。
 
 ---
 
@@ -21,15 +45,19 @@
 | P4 | 米游社客户端基线 | 控制台打印真实 uid | 2~3 天 | ✅ 完成（错误场景未验） |
 | P5 | 数据契约与错误治理 | 脱敏 + 限流 + DTO | 1~2 天 | 未开始 |
 | P6 | 接入真实数据 | 自然语言查真实战绩 | 半天 | ⚠️ 已回退：`character/list` 与 `PlayerTool` 于 11-13 删除，能力由 P9 签到承接 |
-| P7 | 记忆与多轮 | 多轮对话不丢上下文 | 1 天 | 🚧 会话层已落地（P7-1 / P7-2）；P7-3 卡在缺第二个工具 |
+| P7 | 记忆与多轮 | 多轮对话不丢上下文 | 1 天 | 🚧 会话层已落地（P7-1 / P7-2）；第二个工具已上线，P7-3 用例待重跑 |
 | P8 | 工程化扩展（选做） | 多账号 / 可观测 / MCP | 长期 | 未开始 |
 | P9 | 登录与签到 | 扫码拿 stoken，能签当天 | 2~3 天 | 🚧 3 天观察 **0/3**（14~16 服务未运行）；11-16 签到 `AUTH` 失效，续期机制待验（P9-11） |
 | P10 | QQ 入站（OneBot v11） | 在 QQ 私聊里对话 | 1~2 天 | ⏸️ 降级为备选：Step 0 桥已删除（git `3dcd255` 可恢复），协议代码不复用 |
 | P11 | QQ 官方机器人 | 手机 QQ 里直接对话 | 1~2 天 | 🚧 `adapter/qq` + `AgentChatService` + `TextChunker` 已落地；**未真机验收**（P11-5） |
+| P12 | 游戏知识库 | 能引用出处地回答角色/武器/攻略 | 长期 | ⬜ **未立项**：只定了边界与三个前置问题 |
+| P13 | 人设与日常对话 | 闲聊得体、不越界、不编数据 | 长期 | ⬜ **未开工**：先拆 SystemMessage 的「人设 / 能力声明」 |
 
 > **状态校准自 2026-11-07 的代码核对**：P4-5（DeviceIdProvider）、P4-12（关日志）、
 > P6 纵向切片其实都已完成，只是清单没跟上。**这份清单就是项目的单一事实来源，
 > 落后于代码比缺失更危险**——照着旧清单干活会重复劳动。
+> **2026-11-22 又校准了一遍事实层**：HTTP 绑定/签到入口、`login-qr.ps1`、`smoke-agent.ps1`
+> 都已删除，正文里原本教人调用它们的命令已改成 QQ 流程或记录文件。见到命令先看它还在不在。
 
 ---
 
@@ -56,7 +84,7 @@ com.luobo.hoyoagent
     └── config/      HoyoProperties（hoyo.*）+ MihoyoEndpoints（host 覆盖）
 ```
 
-**三条边界**（改代码前先确认自己在哪一边）：
+**四条边界**（改代码前先确认自己在哪一边；第 4 条 2026-11-22 为知识库预留）：
 
 1. `adapter` 只表示**入站**，`mihoyo` 表示**出站**，`channel` 只放**平台无关**的管道
    （切片 / 会话映射 / 出站通知）。
@@ -66,6 +94,10 @@ com.luobo.hoyoagent
    **目前没有测试守着，改代码时请手动核对**（见文末"依赖方向测试仍未做"）。
 3. 凭据只有一个入口 `AccountService`：工具和控制器都从它拿，不自己读文件、不自己读 `.env`。
    （2026-11-20 删掉 `CredentialProvider` 后，写路径也只剩 `save`/`claim` 一个。）
+4. **新域不往老域里塞**（2026-11-22 新增，为知识库预留）：知识库/检索属于独立域 `knowledge/`，
+   现在还没建包。它既不是「米游社的接口」（不进 `mihoyo`），也不是模型可直接执行的动作
+   （不直接写成 `@Tool` 丢进 `agent/tool`）——工具只做「取哪一段知识」的编排，
+   数据源与切分留在 `knowledge`。**没有第二个实现之前别提前抽象**。
 
 测试与脚本、前端调试页仍在原来的位置，不再逐条罗列。
 
@@ -73,6 +105,10 @@ com.luobo.hoyoagent
 `GET /agent?q=` + **请求头 `X-Session-Id`**（带工具，返回 `{code, message, data:{reply, toolsCalled, sessionId, messages}}`；
 不传头 = 一次性会话，请求结束即销毁）、`GET /api/memory/{sessionId}`（窗口内容 + `expired` 标记）、
 `DELETE /api/memory/{sessionId}`（清空会话）
+
+> 注意：HTTP 入口**不注册平台身份**（身份由 `adapter/qq` 在每条消息上注册）。
+> 所以 `/agent` 里的工具调用只会回「没有绑定米游社账号」——它用于调模型和看记忆，
+> 不是签到入口。带工具的真实链路只在 QQ 里。
 
 绑定与签到不再有 HTTP 入口：在 QQ 里发「绑定」扫码，发「帮我签到」触发工具。
 
@@ -220,7 +256,8 @@ P6 接真数据时才发现一个当初没意识到的事：**假数据把「查
 - 10 条用例的**期望值全部作废**——不是过期，是前提错了，不存在"架构回退后又能复用"的场景
 - 已作废的只是**脚本**：旧脚本位于 `git log -p -- scripts/smoke-agent.ps1`
 - 保留下来的是**这张表本身**（在本文档 + `scripts/round1.md` / `round2.md`），因为需要长期复用的是"结果"
-- 新脚本 8 条用例对齐新契约，见 `scripts/smoke-agent.ps1` 头部注释
+- 新脚本 8 条用例对齐新契约（该脚本已于 2026-11-22 随 HTTP 入口删除，
+  `git log -- scripts/smoke-agent.ps1` 可找回最后版本）
 
 **下一步三条的处置：**
 
@@ -343,7 +380,7 @@ P6 接真数据时才发现一个当初没意识到的事：**假数据把「查
 
 **现状（2026-11-13）**：`character/list` 与 `PlayerTool` / `PlayerService` / `CharacterDto` 已删除。
 原因：FufuLauncher 没有这个接口的实现可对照；新账号上恒返回 `5003`（旧账号同请求正常，已确认账号侧）；
-它也不再是产品需要的能力。Agent 现在只剩 `CheckinTool`（P9）。
+它也不再是产品需要的能力。Agent 现在只剩签到类工具（`CheckinTool` + `CheckinOverviewTool`）。
 P6-3 的真实角色输出保留为历史证据；「自然语言 → 真实数据」的闭环仍在，由签到承接。
 
 - [x] P6-1 假的 `DB` / `NOTES` / `ABYSS` 三张表和注释掉的 `@Tool` 已清除，`FakePlayerTool` 改名 `PlayerTool`
@@ -380,17 +417,17 @@ P6-3 的真实角色输出保留为历史证据；「自然语言 → 真实数�
 
 ## P7 · 记忆与多轮 🚧
 
-> **开始前的提醒（2026-11-13 仍未解决）**：多轮的价值体现在「省略了主语也能接上」。
-> 当前只有 1 个无参工具，能测的是"你还记得刚才聊的是安柏吗"，
-> 测不了"那深渊呢"——因为深渊工具不存在。
-> 所以 P6-6/P6-7 至少补回一个工具，P7 的实验才立得住。
+> **开始前的提醒（2026-11-22 校准）**：多轮的价值体现在「省略了主语也能接上」。
+> 11-16 起已有第二个工具（`CheckinOverviewTool`），P7-3 现在能跑
+> 「今天签了吗」→「那星铁呢」；「那深渊呢」仍然缺深渊工具，别拿它当验收。
+> **前置条件已经满足，不要再等第二个工具。**
 
-**现状**：会话层已落地（`agent/memory` + `X-Session-Id`），P7-3 依然写不出验收——
-**卡的不是记忆，是第二个工具**。这条从 11-07 看到现在，一直没变，别再往后拖。
+**现状**：会话层已落地（`agent/memory` + `X-Session-Id`）；窗口 2026-11-18 起改为按轮裁剪
+（`TurnWindowChatMemory`），发现③ 已修。P7-3 只差按新用例跑一遍并记账。
 
-- [x] P7-1 接入 `ChatMemory`：`ChatMemoryProvider` + `MessageWindowChatMemory(20)`，`@AiService` 注解零改动
+- [x] P7-1 接入 `ChatMemory`：`ChatMemoryProvider` + 按轮窗口（`TurnWindowChatMemory`，默认 20 条），`@AiService` 注解零改动
 - [x] P7-2 会话隔离：`@MemoryId` 当不透明字符串；状态全在 `SessionMemoryStore`（会话数上限 + 空闲 TTL）
-- [ ] P7-3 多轮验收「我在查原神」→「那深渊呢」—— **前置是第二个工具**
+- [ ] P7-3 多轮验收「今天签了吗」→「那星铁呢」—— **第二个工具已就位，只差跑**
 - [x] P7-4 部分：`smoke-memory.ps1` 的 D 条 12 轮通过（20 条停住不涨）；30 轮的 token 曲线仍没跑
 - [x] P7-5 观察过一次裁剪 —— 结论比预期狠，见发现 ③
 
@@ -411,7 +448,8 @@ P6-3 的真实角色输出保留为历史证据；「自然语言 → 真实数�
 21 条裁到 20 条时只淘汰 1 条，恰好是窗口里第一条 `USER`，而它对应的 `AI(tool_calls) + TOOL + AI` 全留着。
 于是模型看到的第一条是"没被问过就决定去签到"。
 **它不报错**——只有孤儿 `ToolExecutionResultMessage` 会被 provider 拒绝，孤儿 `AiMessage` 合法。
-要修得自己写 turn-aware 的淘汰（或接受它），**先记账不做**。
+**2026-11-18 已修**：`TurnWindowChatMemory` 改成按 USER 分轮，整轮一起留或一起丢，
+宁可少留一轮也不切断一轮。下面保留为动机说明（不是待办）。
 
 **④ 记忆降低重复调用，但不消除。**
 同会话连问 5 轮「今天签到了吗」：第 2、4、5 轮吃记忆不调工具，**第 3 轮又调了一次**
@@ -458,7 +496,7 @@ P6-3 的真实角色输出保留为历史证据；「自然语言 → 真实数�
 - [ ] 可观测：Micrometer 打点，替换掉 `ToolCallRecorder`
 - [ ] 测试：录制一次真实响应存 JSON，回放跑工具测试（不依赖网络）
 - [ ] 暴露成 MCP
-- [ ] RAG：攻略/角色数据检索（**等有真需求再做**）
+- [ ] RAG：攻略/角色数据检索 —— **已立项为 P12**（不再是「等有真需求」；边界与前置问题见 P12）
 
 ---
 
@@ -470,67 +508,78 @@ P6-3 的真实角色输出保留为历史证据；「自然语言 → 真实数�
 - [x] P9-1 `DsSigner`：DS1 / DS2 两条公式，md5 用外部向量锁住
 - [x] P9-2 `PassportDevice`：持久化扫码 `device_id` + `device_fp`（不持久化会 `-3503`）
 - [x] P9-3 `PassportClient`：建码 / 轮询 / 换 ltoken / 换 cookie_token / **v2 换取**
-- [x] P9-4 `POST /api/auth/qr` + PNG + 轮询状态机；成功写 `~/.hoyo/credential.properties`
+- [x] P9-4 建码 + PNG + 轮询状态机（原 `POST /api/auth/qr`，2026-11-22 起入口改为 QQ 里发「绑定」）；
+  成功写 `~/.hoyo/accounts/<sha256(userId)[0:16]>.account`
 - [x] P9-5 真机扫码：`WAITING→SCANNED→BOUND`，stoken/ltoken/cookie_token 全拿到
 - [x] P9-6 `luna/info` 复测 —— **结论被推翻**：签到认 `cookie_token`+`account_id`，不是 stoken
 - [x] P9-7 三游戏签到打通：星铁/绝区零真签成功，原神当日已签返回 `ALREADY`；幂等已验证
 - [x] P9-7b 角色自动发现（`GameRoleService`），替掉写死的 `HOYO_ROLE_ID`
 - [x] P9-8 `@Scheduled` 每天 00:10 + 当日记录幂等（先文件，多用户再上库）+ 失败可见性，
   见下面「P9-8 的三个决定」
-- [ ] P9-9 stoken 失效时主动提示重新扫码（`/api/auth/refresh` 失败 → 通知）
-  —— 现在失败会亮灯（`/api/checkin/status` 的 `attention` + `kind=AUTH` 日志），但**不会自动续期**；
-  没有通知渠道之前，"提示"就是状态页那行红字
+- [ ] P9-9 stoken 失效时主动提示重新扫码（刷新失败 → `Notifier` 发一条）
+  —— 现在失败会亮灯（`[CHECKIN][ALERT]` + `kind=AUTH` 日志 + `~/.hoyo/checkin` 的记录），
+  但**不会自动续期**；`/api/checkin/status` 与 `/api/auth/refresh` 已于 11-22 随控制器删除，
+  人看的入口变成「QQ 里问一句 + 翻记录文件」，真正的主动提示要靠这一条自己发通知
 - [ ] **P9-11 签到凭据（v1 `cookie_token`）失效后怎么续期——机制未验证**（2026-11-16 实测）
   —— 11-13 同账号还能签（`ALREADY`），11-16 三个角色全 `FAILED / kind=AUTH`，而 `hasStoken=true`、
-  `GET /api/auth/roles` 一切正常。这个组合就是"ltoken 还活着、cookie_token 单独过期"：
+  （当时）`GET /api/auth/roles` 一切正常（该端点 11-22 已删）。这个组合就是"ltoken 还活着、cookie_token 单独过期"：
   FufuLauncher `TokenRefreshService.CheckCookieValidAsync` 的注释原话是
   *"The role binding API validates LToken only. CookieToken can expire independently."*
   → **AUTH 的根因基本可定为 cookie_token 过期**，不是账号、不是风控。
-  但**"点一次 `/api/auth/refresh` 能不能救回来"没有验证过**：`PassportClient.exchangeV2()`
+  但**"刷新一次能不能救回来"没有验证过**：`PassportClient.exchangeV2(stoken, mid)`
   收的是全部 `Set-Cookie`，可能带新的 v1 `cookie_token`（能救），也可能只带 `*_v2`（未必救得了，
   因为签到时那套 cookie 是我们自己拼的）。注意这条**不能说成"只刷 v2 所以救不了"**——
   那是看代码猜的，RefreshResult 里只检查 `ltoken_v2` 只是回报信息，不代表 jar 里没有 v1。
   参照物：FufuLauncher 拿到 v2 后是**删掉** v1 的（`TokenRefreshService.RefreshCookieAsync` 149~153 行），
   说明它认为 v2 够用；我们不敢删，因为 11-12 实测签到认 v1。
-  **下一步是一次实验，不是写代码**：点刷新 → 再 `POST /api/checkin` → 看 `kind` 是否变
+  **下一步是一次实验，不是写代码**：在 QQ 里重新发「绑定」拿一张全新 `cookie_token`，第二天看记录 `kind`；
+  或在测试里直接调 `PassportClient.exchangeV2(stoken, mid)`，看返回的 CookieJar 里到底有没有 v1
 - [x] ~~P9-10 排查 `character/list` 的 `5003`~~ —— **已关闭**：该接口 11-13 删除；实验确认与请求头无关
   （新账号四种头组合全 `5003`，旧账号同一套头 `retcode=0`）
 
-**验收**：连续 3 天自动签到成功，且 `~/.hoyo/credential.properties` 不用再动。
+**验收**：连续 3 天自动签到成功，且 `~/.hoyo/accounts/` 里的凭据不用再动（不需要重新扫码）。
 
 > **2026-11-16 状态：0/3。** `~/.hoyo/checkin/` 里只有 11-13 一条，14/15/16 都没有——
 > 这三天服务根本没在跑（`@Scheduled` 只在进程活着时触发，见坑 15），**不是签到失败**。
-> 想让它成立：今晚之前先重扫二维码（当前凭据已 `AUTH` 失效），然后让服务一直开着。
+> 想让它成立：先在 QQ 里给机器人发「绑定」重扫一次（当前凭据已 `AUTH` 失效），然后让服务一直开着。
 
-**开工命令**：
+**开工命令**（2026-11-22 起没有 HTTP 绑定/签到入口了）：
 
 ```powershell
-.\mvnw.cmd -B -ntp spring-boot:run        # 终端 1
-pwsh -NoProfile -File .\scripts\login-qr.ps1   # 终端 2
-
-# 看今天到底签没签、下一次几点、要不要处理
-Invoke-RestMethod "http://localhost:8080/api/checkin/status" | ConvertTo-Json -Depth 6
-# 手动跑一次（今天已签就不重复请求；force 强制重跑）
-Invoke-RestMethod "http://localhost:8080/api/checkin/run?force=true" -Method Post | ConvertTo-Json -Depth 6
+.\mvnw.cmd -B -ntp spring-boot:run
+# 然后手机 QQ 里：发「绑定」扫码；发「签到了吗」看总览；发「帮我签到」跑一次
 ```
+
+看今天到底签没签——记录文件一天一个 JSON，按 userId 分目录（Windows 上 `~` 就是 `$HOME`）：
+
+```powershell
+Get-ChildItem "$HOME\.hoyo\checkin" -Recurse -Filter *.json |
+  Sort-Object LastWriteTime -Descending | Select-Object -First 3 |
+  ForEach-Object { $_.FullName; Get-Content $_.FullName }
+```
+
+> 注意：QQ 里发「帮我签到」走的是工具，**不写记录文件**（记录是定时任务/启动补签的产物）。
+> 想让当天留下一条 `DONE`，就重启进程等启动补签跑一遍；今天已有 `DONE` 时会跳过。
 
 ### P9-8 的三个决定（比代码重要）
 
 1. **只试一次，失败不自动重试。** 重试会把"连续 3 天成功"这个验收条件糊掉——失败就该亮灯，
-   而不是靠重试掩盖。补跑是人的动作：`POST /api/checkin/run?force=true`。
+   而不是靠重试掩盖。补跑是人的动作：QQ 里发「帮我签到」（走工具、不落记录），
+   或重启进程让启动补签跑一遍（**会落记录**，今日已有 `DONE` 才跳过）。
+   HTTP 那个 `force` 入口随 11-22 删除，别再找了。
 2. **启动补签。** cron 只在进程活着时触发，笔记本合盖一晚就错过整天。
    启动后 `hoyo.checkin.startup-delay`（默认 60s）补一次；今天已有 `DONE` 记录就跳过。
    补签跑在**虚拟线程**里：守护线程，既不卡 `SpringApplication.run`，也不会拖住测试 JVM。
 3. **失败可见，且分类。** `[CHECKIN][ALERT]` 前缀只给失败用，日志里搜一次就能捞全；
-   同时写 `~/.hoyo/checkin/YYYY-MM-DD.json`，重启后状态页仍能读到。
+   同时写 `~/.hoyo/checkin/<日期>.json`，重启后仍能读到（没有状态页了，直接读文件）。
    `kind` 来自 `MihoyoError`（AUTH / NEED_VERIFY / RISK…），所以"要重新扫码"和"网络抖了一下"
-   在日志和状态里是**两种不同的话**，不用正则匹配中文。
+   在日志和记录里是**两种不同的话**，不用正则匹配中文。
 
 **记录文件的形状**（一天一个 JSON，人直接打开也能读）：
 
 ```json
 {
-  "userId": "local", "date": "2026-11-13",
+  "userId": "qq:E43830A902F2", "date": "2026-11-13",
   "trigger": "SCHEDULED",            // SCHEDULED / STARTUP / MANUAL
   "outcome": "DONE",                 // DONE / PARTIAL / FAILED / SKIPPED
   "kind": null,                      // 失败类别，成功时 null
@@ -589,7 +638,7 @@ Invoke-RestMethod "http://localhost:8080/api/checkin/run?force=true" -Method Pos
 1. `QQ_ALLOWLIST` 为空 = 谁都不回。**默认必须是拒绝**，不是「谁都能用」。
 2. 群聊事件现在直接忽略；将来打开也仍只回白名单，但**回复是发在群里的**——白名单挡的是「谁能触发」，挡不住「谁能看见」。
 
-**验收**：QQ 私聊里问「今天签到了吗」，回复与 `GET /api/checkin/status` 一致；
+**验收**：QQ 私聊里问「今天签到了吗」，回复与签到总览一致；当天有记录文件时，两者也要对得上；
 再用一个**不在白名单**的号发同一句，必须没有任何回复（fail closed 的证据，不是"大概没收到"）。
 
 ---
@@ -634,18 +683,61 @@ Invoke-RestMethod "http://localhost:8080/api/checkin/run?force=true" -Method Pos
 出站收口成 `ReplySender`，QQ 适配器退化成「协议翻译」两件套。
 现在不做——**用第二个实现验证抽象**，别对着一个实现提前设计。
 
-**验收**：手机 QQ 里问一句，回复与 `GET /api/checkin/status` 一致；断网重连后仍能收消息。
+**验收**：手机 QQ 里问一句，回复与签到总览一致（当天有记录文件时两者也要对得上）；断网重连后仍能收消息。
 
 ---
 
-## 学习期不要做的事
+## P12 · 游戏知识库（未立项）
 
-- ❌ 向量库 / RAG（还没有非结构化文本需求）
-- ❌ 多 Agent 编排 / 工作流框架
-- ❌ 前端 UI（curl 足够验证一切）
-- ❌ 同时 debug 米游社签名和 Agent 工具调用
-- ❌ 主账号做实验
-- ❌ 一开始就设计多账号/多租户
+> 定位里说的「知识库」，不是把攻略站扒下来塞给模型，而是**能引用出处地回答**：
+> 答「雷电将军带什么武器」时，用户能看见依据是哪一版数据。
+
+**为什么现在不做**：P9 的 3 天观察还是 0/3，P11 未真机验收。第一条能力没站稳之前，
+开第二条主线只会让两边都欠着。
+
+**开工前必须回答的三个问题**（不回答就别写代码）：
+
+1. **数据源**：官方 wiki、游戏内文本导出，还是自己整理？多久更新一次、谁保证？
+   数据源决定切分粒度，也决定「答案过期」的风险有多大。
+2. **检索形态**：角色数值这类**结构化**数据不该走向量检索；攻略/机制说明才需要。
+   先想清楚「哪些问题查表就够，哪些必须读文本」，再决定要不要向量库。
+3. **验收**：知识库没有「8/10 命中」这种便宜指标。先定 20 条问题 + 标准答案 + 出处，
+   判定看「引用是否正确、是否答非所问」，不是看模型说得像不像。
+
+**边界**：新域 `knowledge/`；不进 `mihoyo`（外部客户端），不写成直连外部搜索的 `@Tool`。
+工具只暴露「按主题取知识」，模型不接触原始语料。
+
+---
+
+## P13 · 人设与日常对话（未开工）
+
+**现状**：`MihoyoAssistant` 的 `@SystemMessage` 只有**能力声明**，没有**人设**。
+能力声明必须随工具集改（改错就会承诺做不到的事，见 11-12 那次冒烟）；人设要稳定，
+两者混在一段文本里，加新能力时必然互相牵制。
+
+**开工前的三步**：
+
+1. 把提示词拆成两段：**人设 / 语气**（稳定）+ **能力声明**（随工具变，最好由工具清单生成）。
+2. 定「不知道就说不知道」的硬规则：知识库没命中时，不许用模型自己的记忆补。
+3. 评测：10 条闲聊 + 10 条越界请求（问别人的账号、要发帖、要兑换码），看拒绝得不得体。
+
+**为什么值得做**：签到一天只发生一次、几秒钟就结束。一个只为这几秒钟存在的产品，
+用户不会为它开 QQ——闲聊是留存，不是装饰。
+
+---
+
+## 暂缓做的事（以及解锁条件）
+
+> 这些不是「永远不做」，是「现在做会亏」。每条都写清触发条件，到点就该重新评估。
+
+- ⏸ **向量库 / RAG** —— **已改判**：知识库是定位的一部分，见 P12。解锁条件不是「有需求」，
+  而是 P12 的三个前置问题有答案。
+- ⏸ **多 Agent 编排 / 工作流框架** —— 等单 Agent 的工具数 > 6 且描述重叠压不住（`tool-ideas.md` §6）
+- ⏸ **产品级前端 UI** —— 调试台够验证；等有第二个真人用户再说
+- ❌ **同时 debug 米游社签名和 Agent 工具调用** —— 永远别做，两类问题会互相掩盖
+- ❌ **主账号做实验** —— 永远别做
+- ⏸ **对外多租户 / 开放注册** —— 存储已按用户隔离，但「给自己用」和「给别人用」在合规上
+  是两件事（`mihoyo-auth.md` §9），在决定对外之前一律按自用设计
 
 ---
 
@@ -734,12 +826,11 @@ t = 1793615718, r = x4jM6S, DS = 4ba0172d3a9d270bf488b98272ccfee9
 # 强制刷新依赖（解决"本地有却解析不到"）
 .\mvnw.cmd -B -ntp -U clean test
 
-# 冒烟：Agent 工具用例（用 pwsh 7）
-pwsh -NoProfile -File .\scripts\smoke-agent.ps1
+# 冒烟：会话记忆的差分验收（Agent 工具用例脚本 11-22 已删，见维护记录）
+pwsh -NoProfile -File .\scripts\smoke-memory.ps1
 
-# 冒烟·诱饵模式：让「能力外」的用例变成真测试（先换这个 profile 启动服务）
+# 诱饵模式：让「能力外」的用例变成真测试（脚本已删，人工在调试台确认不调诱饵）
 .\mvnw.cmd -B -ntp spring-boot:run "-Dspring-boot.run.profiles=decoy"
-pwsh -NoProfile -File .\scripts\smoke-agent.ps1
 
 # 看依赖版本是否收敛
 .\mvnw.cmd -B -ntp dependency:tree -Dincludes=dev.langchain4j
@@ -750,30 +841,26 @@ pwsh -NoProfile -File .\scripts\smoke-agent.ps1
 # 打包
 .\mvnw.cmd -B -ntp -DskipTests package
 
-# 调接口
+# 调接口（HTTP 没有平台身份：带工具的问答会回「请先绑定」，签到只在 QQ 里做）
 Invoke-RestMethod "http://localhost:8080/chat?q=你好"
-Invoke-RestMethod "http://localhost:8080/agent?q=萝卜有哪些原神角色" | ConvertTo-Json -Depth 4
+Invoke-RestMethod "http://localhost:8080/agent?q=你好" -Headers @{ "X-Session-Id" = "dev-1" } |
+  ConvertTo-Json -Depth 4
+Invoke-RestMethod "http://localhost:8080/api/memory/dev-1" | ConvertTo-Json -Depth 4
 
-# 签到：状态 / 手动跑调度路径 / 裸调（不落盘）
-Invoke-RestMethod "http://localhost:8080/api/checkin/status" | ConvertTo-Json -Depth 6
-Invoke-RestMethod "http://localhost:8080/api/checkin/run" -Method Post | ConvertTo-Json -Depth 6
-Invoke-RestMethod "http://localhost:8080/api/checkin" -Method Post | ConvertTo-Json -Depth 6
+# 今天的签到结果（没有状态页了，直接读记录文件）
+Get-ChildItem "$HOME\.hoyo\checkin" -Recurse -Filter *.json |
+  Sort-Object LastWriteTime -Descending | Select-Object -First 3 |
+  ForEach-Object { $_.FullName; Get-Content $_.FullName }
 
-# 定时任务失败后想从日志里捞：搜这一个前缀就够了
-Select-String -Path .\logs\*.log -Pattern '\[CHECKIN\]\[ALERT\]'
-
-# 扫码绑定米游社：终端 1 起服务，终端 2 跑脚本（会弹出二维码 PNG）
-pwsh -NoProfile -File .\scripts\login-qr.ps1
-
-# 只想拿建码结果（自己渲染二维码时用）
-(Invoke-RestMethod "http://localhost:8080/api/auth/qr" -Method Post).data
+# 定时任务失败：控制台搜这个前缀（容器里看 docker compose logs）
+docker compose logs | Select-String '\[CHECKIN\]\[ALERT\]'
 
 # 部署时覆盖 .env 位置
 java -jar target\HoyoAgent-0.0.1-SNAPSHOT.jar "--spring.config.import=optional:file:./config/.env[.properties]"
 ```
 
-> 凭据优先级：`~/.hoyo/credential.properties`（扫码写入，带 stoken）**高于** `.env` 的 `HOYO_COOKIE`。
-> 想强制回到手填 cookie，把那个文件删掉即可。
+> 凭据只存在 `~/.hoyo/accounts/`（每用户一个 `.account`，文件名是 `sha256(userId)` 前 16 位）。
+> `.env` 里没有 `HOYO_COOKIE` 这个口子了；绑定、换绑、解绑都在 QQ 里完成。
 
 ---
 
@@ -828,6 +915,21 @@ java -jar target\HoyoAgent-0.0.1-SNAPSHOT.jar "--spring.config.import=optional:f
 
 **维护记录**
 
+- 2026-11-22 文档校准（**无代码变更**）：
+  1) **定位收宽**：新增根目录 `README.md`；本文标题从「学习路线」改为「路线图与任务清单」，
+     目标从「米游社 Agent 工具 / 学习 Agent 开发」改为「米哈游系游戏助手，签到是第一个能力」；
+     顶部加「能力地图」，进度表补 P12（知识库）/ P13（人设与日常对话）；
+     「学习期不要做的事」改为「暂缓做的事（以及解锁条件）」，RAG 从「不做」改判为 P12。
+  2) **事实校准**：P9~P11 与附录 B 里指向已删除的 `/api/auth/*`、`/api/checkin/*`、
+     `login-qr.ps1`、`smoke-agent.ps1` 的命令，全部改成 QQ 流程 / 记录文件 / 现有端点；
+     P9-8 的记录样例 `userId=local` 改为 `qq:<openid>`；P9-9/P9-11 的验证路径改成
+     「重新扫码」或直接调 `PassportClient.exchangeV2()`；P7 发现③ 标注已由
+     `TurnWindowChatMemory` 解决（不再是「先记账不做」）；P7-3 的前置条件已满足。
+  3) **边界预留**：新增第 4 条边界（知识库属于独立域 `knowledge/`，不塞 `mihoyo`、
+     不直接写成 `@Tool`），但**不建空包**。
+  4) 仍**故意没做**：`tool-ideas.md` 未改写（它的范围是「账号数据类工具」，扩成能力地图
+     要等 P12 有数据源决策）；`SystemMessage` 未拆「人设 / 能力声明」（随 P13 一起做）。
+
 - 2026-11-21 包结构调整（无行为变更；`clean test` 132 条全绿）：
   1) `agent/notify` → `channel/notify`（4 个文件，只改 `package`）：`mihoyo.checkin` 之前反向依赖
      `agent.notify`，`mihoyo` 与 `agent` 成环，违反上面第 2 条边界。`Notifier` 自己的注释写着
@@ -839,7 +941,7 @@ java -jar target\HoyoAgent-0.0.1-SNAPSHOT.jar "--spring.config.import=optional:f
      分包轴线从"它是什么种类的类型"改成"它服务于谁"。
   3) `DsSignerTest` 跟着搬到 `mihoyo/transport` 并改 `package`，`mihoyo/sign` 包彻底消失
      （测试留在已无主代码的包里会让包名说谎，也会挡住将来"测试包必须与主代码包一致"的规则）。
-  4) **依赖方向测试仍未做**：这次是靠手动扫描确认无违规。也就是说上面那三条边界现在还是
+  4) **依赖方向测试仍未做**：这次是靠手动扫描确认无违规。也就是说上面那几条边界现在还是
      "约定"，不是"事实"——下次谁再写一个反向 import，没有任何东西会红。
      候选实现：ArchUnit（一个 test 依赖，扫字节码）或零依赖的源码 import 扫描（约 30 行）。
 
