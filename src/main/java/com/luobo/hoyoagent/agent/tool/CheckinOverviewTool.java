@@ -46,6 +46,7 @@ public class CheckinOverviewTool {
             用户要求「帮我签到」「帮我领原石」时不要用本工具，改用 checkinToday。
             """)
     public String getCheckinOverview(@ToolMemoryId String memoryId) {
+        // 先记再判身份：被拒的调用也是一次调用（模型选中了它），不记就看不见——评测基线靠这一行才有数据
         recorder.record("getCheckinOverview", "");
         String userId = sessions.userIdOf(memoryId).orElse(null);
         if (userId == null) {
@@ -57,41 +58,77 @@ public class CheckinOverviewTool {
             // 用 find 而不是 require：未绑定时要回"友好总览"，不是抛异常
             return format(service.overview(userId, accounts.credentialOf(userId).orElse(null)));
         } catch (BusinessException e) {
-            return "【结论】查询签到总览失败：" + e.getMessage();
+            return "查询签到总览失败：" + e.getMessage();
         }
     }
 
+    /**
+     * 工具输出契约（C5）：<b>只给事实，不给措辞</b>。
+     *
+     * <p>和 {@link CheckinTool#format} 同一套规矩，另加两条本工具特有的：
+     * <ul>
+     *   <li>{@code outcome} / {@code trigger} 必须翻成人话——{@code DONE（SCHEDULED）} 是给日志和落盘看的，
+     *       模型看见就会原样说给用户；</li>
+     *   <li>推算出来的值要标「（推算）」——漏签天数是「今天几号 − 累计天数」得到的，不是服务端给的数字，
+     *       模型得知道这一点才有可能在措辞上保留「约」。</li>
+     * </ul>
+     */
     static String format(CheckinOverview overview) {
-        StringBuilder sb = new StringBuilder("【结论】").append(overview.message());
+        StringBuilder out = new StringBuilder("今日 ").append(overview.today());
         if (overview.games().isEmpty()) {
-            return sb.toString();
+            out.append("\n- 没有可查询的角色");
+            if (!overview.message().isBlank()) {
+                out.append("：").append(overview.message());
+            }
+            return out.toString();
         }
-        sb.append("\n【今日】").append(overview.today());
         for (CheckinOverview.Game game : overview.games()) {
-            sb.append("\n  ").append(game.gameName())
-                    .append("（").append(game.uid()).append("）：")
-                    .append(describe(game));
+            out.append("\n- ").append(game.gameName()).append(' ').append(game.uid())
+                    .append("：").append(describe(game));
         }
-        sb.append("\n【最近】");
+        out.append("\n最近");
         if (overview.recent().isEmpty()) {
-            sb.append("还没有签到记录（定时任务可能没跑过）");
+            out.append("\n- 还没有签到记录（定时任务可能没跑过）");
         } else {
             for (CheckinOverview.Recent recent : overview.recent()) {
-                sb.append("\n  ").append(recent.date()).append(" ")
-                        .append(recent.outcome()).append("（").append(recent.trigger()).append("）：")
-                        .append(recent.message());
+                out.append("\n- ").append(recent.date()).append(' ').append(trigger(recent.trigger()))
+                        .append("：").append(outcome(recent.outcome()))
+                        .append("（").append(recent.message()).append("）");
             }
         }
-        return sb.toString();
+        return out.toString();
     }
 
     private static String describe(CheckinOverview.Game game) {
-        return switch (game.status()) {
-            case "SIGNED" -> "今天已签 · 累计 " + game.totalDays()
-                    + " 天 · 本月约漏 " + game.missedEstimate() + " 天";
-            case "UNSIGNED" -> "今天还没签 · 累计 " + game.totalDays()
-                    + " 天 · 本月约漏 " + game.missedEstimate() + " 天";
-            default -> game.message();
+        StringBuilder out = new StringBuilder(switch (game.status()) {
+            case "SIGNED" -> "今天已签";
+            case "UNSIGNED" -> "今天还没签";
+            case "FIRST_BIND" -> "还没绑定该游戏角色";
+            default -> "查询失败";
+        });
+        if (game.totalDays() > 0) {
+            out.append(" · 累计 ").append(game.totalDays()).append(" 天")
+                    .append(" · 本月约漏 ").append(game.missedEstimate()).append(" 天（推算）");
+        }
+        return out.toString();
+    }
+
+    private static String outcome(String value) {
+        return switch (value) {
+            case "DONE" -> "全部成功";
+            case "PARTIAL" -> "部分成功";
+            case "FAILED" -> "失败";
+            case "SKIPPED" -> "未执行";
+            default -> value;
+        };
+    }
+
+    private static String trigger(String value) {
+        return switch (value) {
+            case "SCHEDULED" -> "定时任务";
+            case "STARTUP" -> "启动补签";
+            case "MANUAL" -> "手动";
+            default -> value;
         };
     }
 }

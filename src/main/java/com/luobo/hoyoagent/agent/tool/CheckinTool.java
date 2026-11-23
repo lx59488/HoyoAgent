@@ -15,8 +15,6 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 
-import java.util.stream.Collectors;
-
 /**
  * 签到工具：身份来自 {@link SessionRegistry} 注册的平台用户，不接受任何"签谁"的参数。
  *
@@ -53,6 +51,7 @@ public class CheckinTool {
             + "只是问「签到了吗 / 漏了几天」时不要调用本工具，改用 getCheckinOverview。"
             + "只能签当前账号，不接受指定其他玩家")
     public String checkinToday(@ToolMemoryId String memoryId) {
+        // 先记再判身份：被拒的调用也是一次调用（模型选中了它），不记就看不见——评测基线靠这一行才有数据
         recorder.record("checkinToday", "");
         String userId = sessions.userIdOf(memoryId).orElse(null);
         if (userId == null) {
@@ -65,30 +64,56 @@ public class CheckinTool {
         try {
             summary = checkinService.checkinAll(accounts.requireCredential(userId));
         } catch (BusinessException e) {
-            return "【结论】签到失败：" + e.getMessage();
+            return "签到失败：" + e.getMessage();
         }
 
-        if (summary.results().isEmpty()) {
-            return "【结论】" + summary.message();
-        }
-
-        String lines = summary.results().stream()
-                .map(r -> "  %s（%s）：%s · 累计 %d 天%s".formatted(
-                        r.gameName(),
-                        r.uid(),
-                        describe(r),
-                        r.totalDays(),
-                        r.reward().isBlank() ? "" : " · 奖励" + r.reward()))
-                .collect(Collectors.joining("\n"));
-
-        return "【结论】%s\n【数据】\n%s".formatted(summary.message(), lines);
+        return format(summary);
     }
 
-    private static String describe(CheckinRoleResult result) {
-        return switch (result.status()) {
-            case "SIGNED" -> "签到成功";
-            case "ALREADY" -> "今天已经签过";
-            default -> result.message();
-        };
+    /**
+     * 工具输出契约（C5）：<b>只给事实，不给措辞</b>。
+     *
+     * <ul>
+     *   <li>不写「结论」——归纳是模型的事，工具给出结论就等于把语气从 Java 里写死；</li>
+     *   <li>不出现内部枚举（{@code SIGNED} / {@code ALREADY} / {@code FAILED}），先翻成人话；</li>
+     *   <li>一行一个角色，字段顺序固定；</li>
+     *   <li>不用 {@code 【】}、markdown、表格——QQ 不渲染，模型也容易照抄。</li>
+     * </ul>
+     *
+     * <p>唯一保留原句的是「没有可签到的角色」这条：{@code summary.message()} 说明了原因
+     * （读不到角色 / 凭据失效），那是事实，不是措辞。
+     */
+    static String format(CheckinRunResult summary) {
+        if (summary.results().isEmpty()) {
+            String head = "签到结果：没有可签到的角色";
+            return summary.message().isBlank() ? head : head + "\n原因：" + summary.message();
+        }
+        StringBuilder out = new StringBuilder("签到结果");
+        for (CheckinRoleResult role : summary.results()) {
+            out.append("\n- ").append(role.gameName()).append(' ').append(role.uid())
+                    .append("：").append(describe(role));
+        }
+        return out.toString();
+    }
+
+    private static String describe(CheckinRoleResult role) {
+        StringBuilder out = new StringBuilder(switch (role.status()) {
+            case "SIGNED" -> "新签成功";
+            case "ALREADY" -> "今天已签";
+            case "FIRST_BIND" -> "首次绑定，今天不用签";
+            case "CAPTCHA" -> "需要人机验证";
+            default -> "签到失败";
+        });
+        if (role.totalDays() > 0) {
+            out.append(" · 累计 ").append(role.totalDays()).append(" 天");
+        }
+        if (!role.reward().isBlank()) {
+            out.append(" · 奖励 ").append(role.reward());
+        }
+        if (!role.ok()) {
+            // 失败原因保留原始文案：那是接口给的，不是我们编的
+            out.append("（").append(role.message()).append("）");
+        }
+        return out.toString();
     }
 }
