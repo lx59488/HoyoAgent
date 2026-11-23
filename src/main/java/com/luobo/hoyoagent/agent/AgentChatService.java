@@ -2,6 +2,7 @@ package com.luobo.hoyoagent.agent;
 
 import com.luobo.hoyoagent.agent.memory.SessionMemoryStore;
 import com.luobo.hoyoagent.agent.observability.ToolCallRecorder;
+import com.luobo.hoyoagent.agent.prompt.SystemPrompt;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
@@ -25,7 +26,7 @@ public class AgentChatService {
     /** sessionId 由适配器给，这里只当不透明字符串。失败直接抛，由适配器翻译成"用户能看懂的话"。 */
     public Answer ask(String sessionId, String message) {
         try {
-            String reply = assistant.chat(sessionId, message);
+            String reply = assistant.chat(sessionId, SystemPrompt.compose(), message);
             return new Answer(reply, recorder.drain(), memory.snapshot(sessionId).size());
         } catch (RuntimeException e) {
             recorder.drain();      // 不清就会串到下一轮

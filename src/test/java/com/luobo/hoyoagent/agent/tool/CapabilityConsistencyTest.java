@@ -1,8 +1,7 @@
 package com.luobo.hoyoagent.agent.tool;
 
-import com.luobo.hoyoagent.agent.MihoyoAssistant;
+import com.luobo.hoyoagent.agent.prompt.SystemPrompt;
 import dev.langchain4j.agent.tool.Tool;
-import dev.langchain4j.service.SystemMessage;
 import org.junit.jupiter.api.Test;
 
 import java.lang.reflect.Method;
@@ -22,11 +21,10 @@ import static org.assertj.core.api.Assertions.assertThat;
  *   <li>提示词没写 → 11-12 上了签到、提示词还写着"没有签到能力"，模型直接拒绝用户。</li>
  * </ul>
  *
- * <p>提示词原文从注解上读、不复制一份——复制就等于又造了一个真相，第三次漂移就是这么来的。
  */
 class CapabilityConsistencyTest {
 
-    private static final String PROMPT = promptOf();
+    private static final String PROMPT = SystemPrompt.compose();
 
     @Test
     void everyCapabilityPointsAtAnExistingToolMethod() {
@@ -69,16 +67,5 @@ class CapabilityConsistencyTest {
                 .filter(method -> method.isAnnotationPresent(Tool.class))
                 .map(Method::getName)
                 .collect(Collectors.toSet());
-    }
-
-    private static String promptOf() {
-        try {
-            Method chat = MihoyoAssistant.class.getMethod("chat", String.class, String.class);
-            // @SystemMessage.value() 是 String[]（框架允许拆成多条 system 消息），拼起来当一段文本查
-            return String.join("\n", chat.getAnnotation(SystemMessage.class).value());
-        } catch (NoSuchMethodException e) {
-            throw new IllegalStateException(
-                    "MihoyoAssistant.chat(String, String) 的签名变了，这个测试要跟着改", e);
-        }
     }
 }

@@ -3,6 +3,7 @@ package com.luobo.hoyoagent.agent;
 import dev.langchain4j.service.MemoryId;
 import dev.langchain4j.service.SystemMessage;
 import dev.langchain4j.service.UserMessage;
+import dev.langchain4j.service.V;
 import dev.langchain4j.service.memory.ChatMemoryAccess;
 import dev.langchain4j.service.spring.AiService;
 
@@ -10,22 +11,20 @@ import dev.langchain4j.service.spring.AiService;
 public interface MihoyoAssistant extends ChatMemoryAccess {
 
     /**
-     * 能力声明必须跟着工具集一起改，否则模型会按提示词去承诺自己做不到的事。
+     * system prompt 不在这里——它在 {@code agent.prompt.SystemPrompt}：分段、有版本号、
+     * 能力清单与 {@code Capability} 注册表对齐。
      *
-     * <p>2026-11-07：P6 只保留 getPlayerCharacters 一个工具时，提示词还写着深渊战绩——已收窄。
-     * 2026-11-12：P9 上线签到后，提示词仍写"没有签到能力"，冒烟直接抓到模型拒绝——已补。
-     * 2026-11-13：character/list 与 PlayerTool 删除，能力只剩签到——再次收窄。
-     * <p>2026-11-13：加会话记忆。@MemoryId 是会话身份、@UserMessage 是本轮问题，两者都不能少。
+     * <p>这里只剩接线：{@code {{system}}} 由 {@code AgentChatService} 传入拼好的文本。
+     * <b>别把文字写回注解</b>——那就又回到"改一个字要重编译、人设和能力互相牵制"。
+     *
+     * <p>{@code @MemoryId} 是会话身份、{@code @UserMessage} 是本轮问题，两者都不能少。
+     *
+     * <p>历史（说明为什么 {@code CapabilityConsistencyTest} 必须存在）：
+     * 2026-11-07 提示词写着深渊战绩但工具没有；2026-11-12 上了签到、提示词还写着"没有签到能力"，
+     * 模型直接拒绝用户；2026-11-13 删了角色工具、提示词还留着。
      */
-    @SystemMessage("""
-            你只能访问「当前绑定账号」的米游社数据，无法查询或操作任何其他玩家。
-            当前可用的能力有两项：
-            1. 帮该账号完成米游社每日签到（原神 / 崩坏：星穹铁道 / 绝区零）；
-            2. 查看该账号的签到总览（今天各游戏签没签、累计天数、本月约漏几天、最近 7 天结果）。
-            签到是幂等的：当天已经签过就如实告诉用户「今天已经签过」，不要重复承诺签到成功。
-            「帮我签」是执行动作，用签到工具；「签到了吗 / 漏了几天」是查看，用签到总览，不要用总览去签。
-            你没有查询角色列表、角色详情、树脂、深渊战报、点赞、发帖、修改账号、领取兑换码的能力。
-            用户问到能力之外的事情时，直接说明无法查询，不要用相近的工具去凑答案，也不要凭空编造数据。
-            """)
-    String chat(@MemoryId String sessionId,  @UserMessage String userMessage);
+    @SystemMessage("{{system}}")
+    String chat(@MemoryId String sessionId,
+                @V("system") String system,
+                @UserMessage String userMessage);
 }
