@@ -30,13 +30,17 @@ services:
     environment:
       TZ: Asia/Shanghai
       HOME: /data
+      # 容器内必须监听 0.0.0.0，宿主端口映射才进得来；对外暴露面仍由 ports 的 BIND_ADDR 控制
+      SERVER_ADDRESS: 0.0.0.0
+      # 单机常驻默认走 SQLite（单文件、WAL）；要退回 JSON/JSONL 就在 .env 里设 HOYO_STORAGE_BACKEND=file
+      HOYO_STORAGE_BACKEND: ${HOYO_STORAGE_BACKEND:-sqlite}
 
     ports:
       # 默认只绑本机；服务器上在 .env 里设 BIND_ADDR=0.0.0.0 才对局域网开放
       - "${BIND_ADDR:-127.0.0.1}:${HOST_PORT:-8080}:8080"
 
     volumes:
-      # 唯一需要持久化的目录：$HOME/.hoyo 下是账号凭据、签到记录、device-id
+      # 唯一需要持久化的目录：$HOME/.hoyo 下是账号凭据、签到记录、device-id、记忆与聊天历史
       - hoyo-data:/data
 
     # 运行镜像里没有 curl，用 bash 的 /dev/tcp 探端口

@@ -21,16 +21,37 @@
 </header>
 
 <main class="layout">
-    <section class="card">
-        <div class="card-head">
-            <h2>会话记忆</h2>
-            <button id="btn-memory" class="ghost" type="button">刷新</button>
-        </div>
-        <p class="hint">Agent 会话的记忆窗口，也就是下一轮真正发给模型的内容。</p>
-        <p id="memory-session" class="session-id">—</p>
-        <p id="memory-meta" class="hint">—</p>
-        <ul id="memory-list" class="mem-list"></ul>
-    </section>
+    <div class="side-stack">
+        <section class="card">
+            <div class="card-head">
+                <h2>用户聊天记录</h2>
+                <button id="btn-transcripts" class="ghost" type="button">刷新</button>
+            </div>
+            <p class="hint">按用户分组，每个会话单独一条；只读，记录从这一版开始积累，清空记忆不会删历史。</p>
+            <div class="tx-tools">
+                <div id="tx-filter" class="tx-filter" role="group" aria-label="会话类型">
+                    <button class="tx-seg is-active" type="button" data-kind="all">全部</button>
+                    <button class="tx-seg" type="button" data-kind="c2c">私聊</button>
+                    <button class="tx-seg" type="button" data-kind="group">群聊</button>
+                </div>
+                <input id="tx-search" class="tx-search" type="search"
+                       placeholder="搜用户或会话" autocomplete="off" />
+            </div>
+            <p id="tx-meta" class="hint">—</p>
+            <ul id="tx-list" class="tx-list"></ul>
+        </section>
+
+        <section class="card">
+            <div class="card-head">
+                <h2>会话记忆</h2>
+                <button id="btn-memory" class="ghost" type="button">刷新</button>
+            </div>
+            <p class="hint">Agent 会话的记忆窗口，也就是下一轮真正发给模型的内容。</p>
+            <p id="memory-session" class="session-id">—</p>
+            <p id="memory-meta" class="hint">—</p>
+            <ul id="memory-list" class="mem-list"></ul>
+        </section>
+    </div>
 
     <section class="card chat">
         <div class="card-head">
@@ -54,6 +75,24 @@
         </form>
     </section>
 </main>
+
+<dialog id="tx-dialog" class="tx-dialog" aria-labelledby="tx-title">
+    <div class="tx-head">
+        <div>
+            <h2 id="tx-title">—</h2>
+            <p id="tx-sub" class="hint">—</p>
+        </div>
+        <div class="tx-head-right">
+            <span class="pill pill-muted">只读</span>
+            <button id="btn-tx-close" class="ghost" type="button">关闭</button>
+        </div>
+    </div>
+    <div id="tx-body" class="tx-body"></div>
+    <div class="tx-foot">
+        <button id="btn-tx-older" class="ghost" type="button" disabled>加载更早</button>
+        <span id="tx-foot-note" class="hint"></span>
+    </div>
+</dialog>
 
 <details class="debug" id="debug">
     <summary>调试面板（最近一次请求 / 响应）</summary>

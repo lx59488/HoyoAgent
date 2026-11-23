@@ -4,6 +4,11 @@ spring:
   application:
     name: HoyoAgent
 
+server:
+  # 默认只监听本机：调试台没有鉴权，不能一上来就暴露到局域网。
+  # 容器里必须显式 SERVER_ADDRESS=0.0.0.0，否则宿主端口映射进不去（compose 已设）。
+  address: ${SERVER_ADDRESS:127.0.0.1}
+
 langchain4j:
   open-ai:
     chat-model:
@@ -23,7 +28,11 @@ hoyo:
   state-dir: ${HOYO_STATE_DIR:}          # 本地状态根，默认 ~/.hoyo；docker/k8s 指到挂载卷即可整体搬家
   # account-dir: ${HOYO_ACCOUNT_DIR:}    # 默认 <state-dir>/accounts（每用户一个 .account 文件）
   storage:
-    backend: ${HOYO_STORAGE_BACKEND:file}   # 持久化实现选择：目前只有 file；新增 jdbc 时只改这一行
+    # 记忆与聊天历史的实现：file / sqlite。账号、签到记录目前仍是文件实现，不受这个开关影响。
+    backend: ${HOYO_STORAGE_BACKEND:file}
+    sqlite:
+      path: ${HOYO_SQLITE_PATH:}            # 空 = <state-dir>/hoyo.db
+      busy-timeout: ${HOYO_SQLITE_BUSY_TIMEOUT:5s}   # 并发写等锁上限
   checkin:
     enabled: ${HOYO_CHECKIN_ENABLED:true}
     cron: "${HOYO_CHECKIN_CRON:0 10 0 * * *}"   # 秒 分 时 日 月 周
@@ -31,11 +40,20 @@ hoyo:
     startup-delay: ${HOYO_CHECKIN_STARTUP_DELAY:60s}  # 启动后多久补签（错过 00:10 时）
     dir: ${HOYO_CHECKIN_DIR:}           # 默认 <state-dir>/checkin，一天一个 JSON
   memory:
-    max-messages: ${HOYO_MEMORY_MAX_MESSAGES:20}   # 一次工具调用占 3~4 条，20 ≈ 4~5 轮
+    max-messages: ${HOYO_MEMORY_MAX_MESSAGES:60}   # 硬上限；正常路径会先压缩成「摘要 + 最近几轮」
     max-sessions: ${HOYO_MEMORY_MAX_SESSIONS:200}  # 超了淘汰最久未用
     idle-ttl: ${HOYO_MEMORY_IDLE_TTL:2h}           # 空闲超时 = 下次访问当作新会话
     dir: ${HOYO_MEMORY_DIR:}                       # 默认 <state-dir>/memory，一个会话一个 JSON
     retention: ${HOYO_MEMORY_RETENTION:30d}        # 落盘记忆保留期，每天 04:30 清一次
+    compaction:
+      enabled: ${HOYO_MEMORY_COMPACTION_ENABLED:true}          # 超窗先压成摘要，而不是直接丢
+      trigger-messages: ${HOYO_MEMORY_COMPACTION_TRIGGER:40}   # 超过多少条触发；必须小于 max-messages
+      keep-turns: ${HOYO_MEMORY_COMPACTION_KEEP_TURNS:3}       # 压缩时保留最近几个完整轮次
+      max-summary-chars: ${HOYO_MEMORY_COMPACTION_MAX_SUMMARY_CHARS:800}  # 摘要正文上限
+  transcript:
+    enabled: ${HOYO_TRANSCRIPT_ENABLED:true}       # 完整聊天历史总开关；关了调试台列表为空
+    dir: ${HOYO_TRANSCRIPT_DIR:}                   # 默认 <state-dir>/transcripts，一个会话一个 JSONL
+    retention: ${HOYO_TRANSCRIPT_RETENTION:90d}    # 只追加、不重写；每天 04:40 清一次
   notify:
     enabled: ${HOYO_NOTIFY_ENABLED:false}   # 签到结果推送；默认关，关了只写日志 + 落盘
     url: ${HOYO_NOTIFY_URL:}                # webhook 地址（企业微信/飞书/Bark/自建）
@@ -55,7 +73,6 @@ qq:
   enabled: ${QQ_BOT_ENABLED:false}          # 默认关：没凭据也能正常启动
   app-id: ${QQ_APP_ID:}
   client-secret: ${QQ_APP_SECRET:}
-  allowlist: ${QQ_ALLOWLIST:}               # 存 openid（不是 QQ 号，纯数字会被启动时警告），逗号分隔；空 = 谁都不回
   api-base: ${QQ_API_BASE:https://api.sgroup.qq.com}   # 沙箱是 https://sandbox.api.sgroup.qq.com
   max-replies: 4                            # 平台硬上限：同一 msg_id 最多回 4 条
   reply-chunk-chars: 600

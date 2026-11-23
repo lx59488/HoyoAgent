@@ -13,9 +13,9 @@ HoyoAgent 用 QQ 当入口、用大模型当大脑，把「米游社账号数据
 | 绑定 / 换绑 / 解绑米游社账号 | QQ 私聊发「绑定」，扫机器人回的二维码 | ✅ |
 | 每日自动签到（三个游戏） | 每天 00:10 自动跑；错过则启动 60s 后补 | ✅ |
 | 签到总览（今天签没签 / 累计 / 最近 7 天；可只看一个游戏） | QQ 里问「签到了吗」或「星铁签了吗」 | ✅ |
-| 多轮对话与会话记忆 | 同一会话自动带上文；窗口按「轮」裁剪，可落盘 | ✅ |
+| 多轮对话与会话记忆 | 同一会话自动带上文；超窗先把更早轮次压成摘要，最近几轮逐字保留 | ✅ |
 | 签到结果推送 | webhook（企业微信 / 飞书 / Bark / 自建），默认关 | ✅ |
-| Web 调试台 | <http://localhost:8080/>：聊天 + 看模型这一轮真正收到的记忆 | ✅ |
+| Web 调试台 | <http://localhost:8080/>：聊天 + 只读查看各用户完整聊天历史与会话记忆 | ✅ |
 | 游戏知识库（角色 / 武器 / 攻略问答） | — | 🚧 未立项，见 [ROADMAP P12](docs/ROADMAP.md) |
 | 人设与日常对话 | — | 🚧 未开工，见 [ROADMAP P13](docs/ROADMAP.md) |
 
@@ -24,7 +24,9 @@ HoyoAgent 用 QQ 当入口、用大模型当大脑，把「米游社账号数据
 判断标准见 [tool-ideas.md](docs/tool-ideas.md) §5。
 
 > 带工具的链路只在 QQ 里成立：HTTP 入口没有平台身份，工具会回「没有绑定米游社账号」。
-> Web 调试台用来聊天和看记忆，不用来签到。
+> Web 调试台用来聊天、看记忆和各用户的完整聊天历史，不用来签到。
+>
+> 调试台**没有鉴权**：只在本机或可信内网打开；聊天历史是明文落盘的，别把端口暴露到公网。
 
 ## 架构
 
@@ -63,7 +65,11 @@ QQ 入口（可选）：`.env` 里设 `QQ_BOT_ENABLED=true` + `QQ_APP_ID` / `QQ_
 把自己加成「开发体验用户」，然后私聊机器人发「绑定」。细节见 [qq-inbound.md](docs/qq-inbound.md)。
 
 Docker：`docker compose up -d --build`。唯一需要持久化的是卷里的 `~/.hoyo`
-（账号凭据、签到记录、记忆、device-id）。
+（账号凭据、签到记录、device-id，以及 `hoyo.db` 里的记忆与聊天历史）。
+
+存储默认 `HOYO_STORAGE_BACKEND=file`（JSON/JSONL，便于直接看文件）；`docker compose`
+默认改成 `sqlite`（单文件 + WAL，单机常驻更稳）。要切回文件在 `.env` 里设
+`HOYO_STORAGE_BACKEND=file`；SQLite 路径默认 `<state-dir>/hoyo.db`，可用 `HOYO_SQLITE_PATH` 覆盖。
 
 ## 文档
 
@@ -71,10 +77,11 @@ Docker：`docker compose up -d --build`。唯一需要持久化的是卷里的 `
 |---|---|---|
 | [ROADMAP.md](docs/ROADMAP.md) | 路线图、进度、决策与踩坑记录——**单一事实来源** | 子系统协议细节 |
 | [mihoyo-auth.md](docs/mihoyo-auth.md) | 米游社账号：扫码、token 四层、多用户凭据 | 项目整体定位 |
-| [qq-inbound.md](docs/qq-inbound.md) | QQ 接入：官方机器人 WS、白名单、被动回复限制 | 业务能力 |
+| [qq-inbound.md](docs/qq-inbound.md) | QQ 接入：官方机器人 WS、平台侧准入、被动回复限制 | 业务能力 |
 | [tool-ideas.md](docs/tool-ideas.md) | 工具选型：还能加哪些「账号数据」工具、哪些不做 | 知识库 / 闲聊 |
 
 > 子系统文档只承诺它自己那一块。想知道「这个项目要长成什么样」，看本页和
 > [ROADMAP 顶部的能力地图](docs/ROADMAP.md)。
 
-最后校准：2026-11-23（契约 C1–C5 全部落地；绑定与签到只在 QQ 里，HTTP 入口 11-22 已移除）。
+最后校准：2026-11-23（契约 C1–C5 全部落地；绑定与签到只在 QQ 里，HTTP 入口 11-22 已移除；
+记忆与聊天历史支持 SQLite 后端，见 [ROADMAP P7-8](docs/ROADMAP.md)）。

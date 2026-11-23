@@ -54,7 +54,7 @@
 
 | 模块 | 状态 | 落点 | 缺什么 | 归属 |
 |---|---|---|---|---|
-| 短期记忆 | ✅ | `TurnWindowChatMemory`、`SessionMemoryStore`、`FileMemoryStore` | 并发不安全（见 C3） | C3 |
+| 短期记忆 | ✅ | `TurnWindowChatMemory`、`SessionMemoryStore`、`MemoryStore`（file / sqlite；P7-7 摘要压缩） | 同会话并发已由 `SessionSerializer` 串行（见 C3）；跨进程共享仍无 | C3 |
 | 长期记忆 / 用户画像 | ⬜ | — | 跨会话偏好（「我主玩原神」）无处可存，也不该塞窗口 | §4 |
 | 知识（RAG / 结构化） | ⬜ | 规划 `knowledge/` | 无；边界已定（不进 `mihoyo`、不写成直连检索的 `@Tool`） | P12 |
 | 计划 / 任务分解与反思 | ⬜ | — | 无 | §4 |
@@ -65,7 +65,7 @@
 
 | 模块 | 状态 | 落点 | 缺什么 | 归属 |
 |---|---|---|---|---|
-| 权限·谁能用 | ✅ | `QQ_ALLOWLIST`（空 = 谁都不回） | — | P11 |
+| 权限·谁能用 | ✅ | QQ 开放平台后台准入（体验成员 / 可见范围）；应用侧不维护 openid 白名单 | — | P11 |
 | 权限·能做什么 | 🟡 | `Capability.Risk`（`READ` / `WRITE` 挂在注册表上） | 已分级，但写工具仍无二次确认；`IRREVERSIBLE` 等真有不可逆动作再加 | **C2** |
 | 事实约束（不编造） | 🟡 | `SystemPrompt.CAPABILITIES` 的「不能做什么」 | 能力外的硬规则已写进 `<capabilities>`；缺「知识未命中就说不知道」的可执行规则与出处 | C1 + P12 |
 | 错误分类与降级 | 🟡 | `mihoyo/error/MihoyoError`、`describe(e)` | 缺 `ErrorKind` → 人话的映射表；重试策略未定 | P5 |
@@ -147,15 +147,17 @@
 2. `uid` / `userId` **永不作为工具参数**（`mihoyo-auth.md` §7）。工具只通过 `@ToolMemoryId` 拿会话键，再经 `SessionRegistry` 换 userId。
 3. **同一 sessionId 的请求串行执行。** 一轮 5~20 秒，用户连发两条必然重叠。
 
-**为什么第 3 条是契约不是优化**：`TurnWindowChatMemory.add()` 是「读 → 加一条 → 写回」（`getMessages` 后 `updateMessages`），没有任何锁；`QqBotDispatcher` 是每条消息一个虚拟线程。两条并发消息会各自读到同一份 20 条、各自 +1 写回，**后写的覆盖先写的**——不报错，只是模型无故失忆一格。
+**为什么第 3 条是契约不是优化**：`TurnWindowChatMemory.add()` 是「读 → 加一条 → 写回」（`getMessages` 后 `updateMessages`），没有任何锁；`QqBotDispatcher` 是每条消息一个虚拟线程。两条并发消息会各自读到同一份窗口、各自 +1 写回，**后写的覆盖先写的**——不报错，只是模型无故失忆一格。
 
-**落点**：只差 `channel/SessionSerializer`（条带锁，约 70 行含注释）+ `QqBotDispatcher` 用它包住 `chat.ask`。
+**落点**：`channel/SessionSerializer`（条带锁）+ `QqBotDispatcher` 与 `AgentController` 都用它包住 `chat.ask`；
+一次性会话 id 每次新，等价直通，不必额外加锁成本。
 **不要**在这里顺手引入 `RequestContext`——那是第二条身份通路，不是这个问题的一部分。
 
-**验证**：`SessionSerializerTest` —— 同 key 两线程并发时第二个必须等第一个；不同 key 不互斥。加上 `TurnWindowChatMemory` 的并发读写测试。
+**验证**：`SessionSerializerTest` —— 同 key 两线程并发时第二个必须等第一个；不同 key 不互斥。
+`AgentControllerTest` 锁住 `/agent` 的同会话串行与一次性会话 evict。
 
-**现在违反**：无（2026-11-23 收口）——`SessionSerializer` 包住了整段 `chat.ask`，同会话并发不再互相覆盖。
-唯一例外是 `/agent` 调试口：同一 session 并发仍不串行，**故意**不包（单人顺序使用；它变成真实入口时再收口）。
+**现在违反**：无（2026-11-23 收口）——`SessionSerializer` 包住了整段 `chat.ask`，QQ 与 `/agent`
+走同一条路径，同会话并发不再互相覆盖。
 
 ---
 

@@ -13,8 +13,9 @@
 
 **最后更新：2026-11-23**（①**契约 C1–C5 全部落地**：C1-a 四段 prompt、C2 能力注册表、C3 会话串行、
 C4 `TurnTrace` + 20 条评测基线、C5 工具输出契约；②**本表回填真实状态**——此前 C1/C2 还写着「未开工」，
-而 11:27 / 12:33 / 13:11 的三个提交已经把代码落了；③139 条测试全绿（`-Dgroups=!network` 排除联网用例），
-评测基线首跑 **18/20（有效 10/12）**，两条 FAIL 都是 markdown 格式，详见文末维护记录。
+而 11:27 / 12:33 / 13:11 的三个提交已经把代码落了；③**测试 229 条全绿**（`-Dgroups=!network` 排除联网用例），
+评测基线首跑 **18/20（有效 10/12）**，两条 FAIL 都是 markdown 格式；④同日完成生产化 P0（`/agent` 串行、
+`SessionMemoryStore` 原子化、默认只听本机）与 P1（SQLite 存储 + 旧文件迁移），详见文末维护记录。
 11-22 的定位收宽与 HTTP 入口删除见文末维护记录。
 P9 的 3 天观察仍是 **0/3**（凭据 11-16 起 `AUTH` 失效，要先重扫）；QQ 主线 P11 已落地但**未真机验收**）
 
@@ -53,7 +54,7 @@ P9 的 3 天观察仍是 **0/3**（凭据 11-16 起 `AUTH` 失效，要先重扫
 | P4 | 米游社客户端基线 | 控制台打印真实 uid | 2~3 天 | ✅ 完成（错误场景未验） |
 | P5 | 数据契约与错误治理 | 脱敏 + 限流 + DTO | 1~2 天 | 未开始 |
 | P6 | 接入真实数据 | 自然语言查真实战绩 | 半天 | ⚠️ 已回退：`character/list` 与 `PlayerTool` 于 11-13 删除，能力由 P9 签到承接 |
-| P7 | 记忆与多轮 | 多轮对话不丢上下文 | 1 天 | 🚧 会话层已落地（P7-1 / P7-2）；第二个工具已上线，P7-3 用例待重跑 |
+| P7 | 记忆与多轮 | 多轮对话不丢上下文 | 1 天 | 🚧 会话层 / 摘要压缩 / 只读历史 / SQLite 后端已落地（P7-1/2/6/7/8）；P7-3 用例待重跑 |
 | P8 | 工程化扩展（选做） | 多账号 / 可观测 / MCP | 长期 | 未开始 |
 | P9 | 登录与签到 | 扫码拿 stoken，能签当天 | 2~3 天 | 🚧 3 天观察 **0/3**（14~16 服务未运行）；11-16 签到 `AUTH` 失效，续期机制待验（P9-11） |
 | P10 | QQ 入站（OneBot v11） | 在 QQ 私聊里对话 | 1~2 天 | ⏸️ 降级为备选：Step 0 桥已删除（git `3dcd255` 可恢复），协议代码不复用 |
@@ -107,11 +108,12 @@ C5 是 C1 的下半场：prompt 那边放开了措辞，工具这边就不能再
 ```
 com.luobo.hoyoagent
 ├── adapter/   入站：http（调试页 / API）、qq（官方机器人 WS 网关 + 被动回复）
-├── agent/     Agent 层：AiService、工具、记忆、观测；依赖 mihoyo，不反向
+├── agent/     Agent 层：AiService、工具、记忆、聊天历史、观测；依赖 mihoyo，不反向
 ├── channel/   平台无关的管道：切片（TextChunker）、会话→用户映射（SessionRegistry）、
 │              出站通知（notify/：Notifier 接口 + WebhookNotifier 实现）
 ├── common/    横切：统一响应信封（ApiResult）、错误码、异常处理、日志脱敏（Mask）、
-│              本地存储基座（storage/LocalFileStore：目录解析 + 原子写 + 哈希文件名）
+│              本地存储基座（storage/LocalFileStore：目录解析 + 原子写 + 哈希文件名；
+│              storage/SqliteDb + SqliteProperties：SQLite 连接 / 建表 / 迁移）
 └── mihoyo/    出站：米游社客户端
     ├── transport/   唯一 HTTP 管道 + 请求头套装（salt/版本锁在一起）+ DsSigner / MihoyoHost
     ├── credential/  Account / Credential / CookieJar；AccountService 是凭据唯一入口
@@ -138,10 +140,11 @@ com.luobo.hoyoagent
 
 测试与脚本、前端调试页仍在原来的位置，不再逐条罗列。
 
-接口：`GET /`（调试页：只做聊天调试 + 会话记忆）、`GET /chat?q=`（纯问答，对照组：无工具、无记忆）、
+接口：`GET /`（调试页：聊天调试 + 只读聊天历史 + 会话记忆）、`GET /chat?q=`（纯问答，对照组：无工具、无记忆）、
 `GET /agent?q=` + **请求头 `X-Session-Id`**（带工具，返回 `{code, message, data:{reply, toolsCalled, sessionId, messages}}`；
 不传头 = 一次性会话，请求结束即销毁）、`GET /api/memory/{sessionId}`（窗口内容 + `expired` 标记）、
-`DELETE /api/memory/{sessionId}`（清空会话）
+`DELETE /api/memory/{sessionId}`（清空会话）、`GET /api/transcripts`（有历史的会话列表，按最后聊天时间倒序）、
+`GET /api/transcripts/{sessionId}?before=&limit=`（只读分页，`seq` 升序；**没有写/删接口**）
 
 > 注意：HTTP 入口**不注册平台身份**（身份由 `adapter/qq` 在每条消息上注册）。
 > 所以 `/agent` 里的工具调用只会回「没有绑定米游社账号」——它用于调模型和看记忆，
@@ -460,13 +463,18 @@ P6-3 的真实角色输出保留为历史证据；「自然语言 → 真实数�
 > **前置条件已经满足，不要再等第二个工具。**
 
 **现状**：会话层已落地（`agent/memory` + `X-Session-Id`）；窗口 2026-11-18 起改为按轮裁剪
-（`TurnWindowChatMemory`），发现③ 已修。P7-3 只差按新用例跑一遍并记账。
+（`TurnWindowChatMemory`），发现③ 已修；2026-11-23 起超窗先压成摘要（P7-7），硬上限默认 60 条。
+P7-3 只差按新用例跑一遍并记账。完整聊天历史另存一份 append-only 流水（P7-6），和窗口互不影响；
+2026-11-23 起两者都可切到 SQLite（P7-8），默认仍是文件。
 
-- [x] P7-1 接入 `ChatMemory`：`ChatMemoryProvider` + 按轮窗口（`TurnWindowChatMemory`，默认 20 条），`@AiService` 注解零改动
+- [x] P7-1 接入 `ChatMemory`：`ChatMemoryProvider` + 按轮窗口（`TurnWindowChatMemory`，默认 60 条硬上限 + 摘要压缩），`@AiService` 注解零改动
 - [x] P7-2 会话隔离：`@MemoryId` 当不透明字符串；状态全在 `SessionMemoryStore`（会话数上限 + 空闲 TTL）
 - [ ] P7-3 多轮验收「今天签了吗」→「那星铁呢」—— **第二个工具已就位，只差跑**
 - [x] P7-4 部分：`smoke-memory.ps1` 的 D 条 12 轮通过（20 条停住不涨）；30 轮的 token 曲线仍没跑
 - [x] P7-5 观察过一次裁剪 —— 结论比预期狠，见发现 ③
+- [x] P7-6 只读聊天历史：每会话 append-only JSONL（`~/.hoyo/transcripts/`，默认 90 天），调试台可按用户看全文；读不 touch、清空记忆不删历史
+- [x] P7-7 超窗摘要压缩：先压成 `SystemMessage` 摘要再裁剪（`ConversationCompactor`，默认 40 条触发 / 保留 3 轮），失败回退到按轮裁剪
+- [x] P7-8 SQLite 存储后端：记忆与聊天历史可切 `hoyo.storage.backend=sqlite`（单文件 + WAL，旧文件懒迁移 / 启动导入），file 后端保留
 
 ### P7 的四个发现（都是实测，不是推测）
 
@@ -501,16 +509,18 @@ P6-3 的真实角色输出保留为历史证据；「自然语言 → 真实数�
 | 窗口顶到上限 | 连问 5 轮后 `messages=20` 停住；`SYSTEM` 常驻第 1 条，占掉一个名额 |
 | 孤儿 tool 结果 | 无。淘汰 `AI(tool_calls)` 时框架连带淘汰后继 `TOOL`——**这段不用自己写**，写测试证明就行 |
 | 观测端点 | `GET /api/memory/{id}` 能看到窗口原文；`expired` 区分"看得见"与"下一轮收不到" |
-| 单测 | `SessionMemoryStoreTest` 11 条 + `MemoryPropertiesTest` 3 条；`[MEMORY]` 的淘汰/超时两行日志终于跑到 |
+| 单测 | `SessionMemoryStoreTest` 11 条 + `MemoryPropertiesTest` 5 条；`[MEMORY]` 的淘汰/超时两行日志终于跑到 |
 | **`smoke-memory.ps1`（2026-11-16 实跑）** | **4/4**：A 同会话第二问 0 次工具调用 / B 无会话必调 / C 跨会话必调 / D 12 轮后仍 20 条 |
 | 裁剪痕迹（同日复现） | D 的窗口头部是一条 `AI(工具调用)`，它对应的 `USER` 已被淘汰——发现 ③ 的现场复现了一次 |
 
 **常见坑**
 
-- memory 是两层：RAM 里的会话（`SessionMemoryStore`，会话数上限 + 空闲 TTL）和落盘的 JSON
-  （`FileMemoryStore`，`~/.hoyo/memory/`，30 天保留）。**重启不丢**——所以"别急着上 Redis"仍然成立，
-  但要先分清疼的是"进程内淘汰"还是"多副本共享"，两者解法完全不同
-- 窗口太大 = 每次都烧钱；太小 = 模型失忆。20 条约等于 4~5 轮带工具的对话（一次工具调用占 3~4 条）
+- memory 是两层：RAM 里的会话（`SessionMemoryStore`，会话数上限 + 空闲 TTL）和持久化
+  （`file` 后端是 `FileMemoryStore` 的 JSON，`sqlite` 后端是 `memory_session` 表；30 天保留）。
+  **重启不丢**——所以"别急着上 Redis"仍然成立，但要先分清疼的是"进程内淘汰"还是"多副本共享"，
+  两者解法完全不同
+- 窗口太大 = 每次都烧钱；太小 = 模型失忆。默认 60 条硬上限，正常会先压成「摘要 + 最近 3 轮」；
+  一次工具调用占 3~4 条，60 条约等于 12 轮
 - 会话 id 是**适配器**产出的，Agent 不解析也不信任。将来 onebot 接入时 id 会含 QQ 号，所以日志一律走 `mask()`
 - **不传会话 id ≠ "给个 default 会话"**：后者会让所有匿名调用串进同一个对话，也会让冒烟用例互相污染
 - 模型调用抛异常时，本轮用户消息已经在 memory 里（框架在发请求前就 add 了），
@@ -521,14 +531,79 @@ P6-3 的真实角色输出保留为历史证据；「自然语言 → 真实数�
   store 被反复清空重写；带工具那轮更糟——轮内留下了孤零零一条 `TOOL_EXECUTION_RESULT`，
   下一轮必然被 provider 拒绝。默认 2h 不是随便定的，`hoyo.memory.idle-ttl` 调小要按分钟起步
 
+### P7-6 · 只读聊天历史（2026-11-23）
+
+**为什么不把 `max-messages` 调大**：窗口是"下一轮真正发给模型的东西"，按轮裁剪到硬上限
+（默认 60 条，正常会更早压成摘要）；更早的轮次要么被压成摘要、要么被裁掉，原文不再保留。
+想知道"这个用户到底聊过什么"，还是得另存一条 append-only 流水，和窗口各管各的。
+
+- 存储：`agent/transcript`，一个会话一个 `.jsonl`（`<state-dir>/transcripts/`），一行一轮，
+  `seq` 会话内递增，分页靠它；文件名仍是 sha256 前 32 位，不把 openid 写进文件系统。
+- 记录点：`AgentChatService#ask`。只有 `userId` 非空才写（QQ），浏览器与一次性会话不写——
+  否则历史列表会被调试用的 UUID 会话灌满。失败轮也写，`assistant=null` + `error` 摘要，
+  免得到时候"用户问了但历史里没有"。
+- 只读：`GET /api/transcripts` + `GET /api/transcripts/{sessionId}?before=&limit=`；
+  **没有 POST / DELETE**。读不 `touch` 会话、不续 TTL，和 `snapshot/expired` 同一约定；
+  `DELETE /api/memory/{id}` 只清窗口，不删历史。
+- 限界：默认保留 90 天（比记忆的 30 天长），每天 04:40 清理；`hoyo.transcript.enabled=false`
+  可整体关掉。**历史从这一版开始积累，之前的轮次已被窗口裁掉，无法回填。**
+- 调试台：左栏按用户分组，组内每个会话单独一条（掩码 userId、轮数、最后时间），点开 `<dialog>` 看全文，
+  「加载更早」按 `seq` 往前翻；页面上没有任何编辑 / 删除入口。
+- 单测：`FileTranscriptStoreTest` 11 条（追加 / 列表倒序 / 分页 / 坏行 / 失败轮 / 清理 / 关闭 /
+  重启续 seq / 预览）+ `TranscriptControllerTest` 2 条（GET 可用；POST / DELETE 无映射，业务码 405）。
+
+### P7-7 · 超窗摘要压缩（2026-11-23）
+
+**为什么不只是把窗口调大**：窗口是每轮发给模型的全部历史，调大只是把"失忆"推迟，token 线性涨；
+真正要保的是更早轮次里的事实。所以超过阈值时，把最早的完整轮次交给模型压成一段摘要，
+替换掉旧轮，只保留摘要 + 最近几轮。
+
+- 存放：摘要是一条 `SystemMessage`（前缀 `【更早对话摘要】`），放在窗口头部。
+  `TurnWindowChatMemory` 本来就不裁 SYSTEM，`ChatMessageSerializer` 也原生支持它，落盘格式不用改。
+- 触发：`TurnWindowChatMemory#add` 里、`trim` **之前**调用 `ConversationCompactor`；
+  顺序不能反，否则旧轮已被裁掉，摘要没有素材。默认 `max-messages=60`，
+  `compaction.trigger-messages=40`、`keep-turns=3`、`max-summary-chars=800`。
+- 失败：模型调用异常、摘要为空、或压完不比原来短，都原样返回，由 `trim` 兜底——
+  压缩是"尽量多记"，不能把整轮聊天打挂。
+- 分块：旧内容超过一次输入上限（12000 字）时按块摘要，后一块带着前一块的摘要继续，避免只看到最近一截。
+- 配置：`hoyo.memory.compaction.{enabled,trigger-messages,keep-turns,max-summary-chars}`；
+  `enabled=false` 退回按轮裁剪。`trigger` 必须小于 `max-messages`，配置层会强行夹住。
+- 单测：`ConversationCompactorTest` 9 条（触发 / 阈值内 / 关闭 / 失败 / 合并旧摘要 / 空摘要 /
+  截断 / 分块 / 全是最近轮）+ `TurnWindowChatMemoryTest` 新增 1 条（先压后裁 + 摘要留在头部）+
+  `FileMemoryStoreTest` 新增 1 条（SystemMessage 落盘往返）。
+
+### P7-8 · SQLite 存储后端（2026-11-23）
+
+**为什么切**：单个 `hoyo.db` 比几百个 JSON/JSONL 文件更容易备份、迁移和排查；WAL 让「记忆窗口的
+整份替换」和「聊天历史的追加」不再依赖原子重命名，也省掉 `FileMemoryStore` 每次 save 重写整份 JSON
+的开销。默认仍是 `file`，`docker compose` 默认 `sqlite`——单机常驻更适合后者。
+
+- 依赖：`org.xerial:sqlite-jdbc:3.49.1.0`（直接 JDBC，不引入连接池/ORM）。
+- 表：`memory_session(session_id PK, updated_at, payload)`；`transcript_session(session_id PK, user_id,
+  turns, last_at, preview)`；`transcript_turn(session_id, seq, at, user_id, user_text, assistant_text,
+  tools, error, PK(session_id, seq))`；`meta(k, v)` 记录一次性迁移标记。3 个索引：`memory updated_at`、
+  `turn at`、`turn user_id`。
+- 适配器：`SqliteMemoryStore` / `SqliteTranscriptStore` 只在 `hoyo.storage.backend=sqlite` 时装配；
+  file 实现加 `havingValue="file", matchIfMissing=true`，两套 bean 不冲突。
+- 迁移：记忆按会话懒迁移（SQLite miss 时读旧 `FileMemoryStore` 文件并写回）；聊天历史在
+  `ApplicationReadyEvent` 里把旧 `transcripts/*.jsonl` 一次性导入（`INSERT OR IGNORE` + meta 标记）。
+  旧文件不删，便于回滚。
+- 配置：`hoyo.storage.sqlite.path`（空 = `<state-dir>/hoyo.db`）、`busy-timeout`（默认 5s）；连接统一设
+  `PRAGMA journal_mode=WAL / synchronous=NORMAL / foreign_keys=ON`。
+- 限界：SQLite 是**单机单写者**方案，多实例共享同一个库仍会锁冲突；`MemoryStore` / `TranscriptStore`
+  接口已留好，后续换 PostgreSQL 只需再加一个实现。账号与签到记录目前固定文件实现，不受该开关影响。
+- 单测：`SqliteMemoryStoreTest` 7 条、`SqliteTranscriptStoreTest` 8 条、`SqliteBackendTest` 1 条
+  （`@SpringBootTest` 断言 sqlite 装配）；全量 229 条通过。18080 冒烟：旧 JSONL 迁移成 1 会话/1 轮后
+  `GET /api/transcripts` 正常返回。
+
 ---
 
 ## P8 · 工程化与扩展（选做）
 
 - [ ] 多账号：三个存储边界都已就位（`AccountStore` 每用户一个 `.account` 文件、
-  `CheckinRecordStore` 每人一个记录目录、`MemoryStore` 每会话一个 JSON），还差
+  `CheckinRecordStore` 每人一个记录目录、记忆/聊天历史按会话存 SQLite 或 JSON/JSONL），还差
   `@ToolMemoryId → userId → 凭据` 的解析与存储加密。存储根已统一到 `hoyo.state-dir`，
-  实现由 `hoyo.storage.backend` 选择（目前只有 `file`，见 2026-11-21 维护记录）
+  实现由 `hoyo.storage.backend` 选择（`file` / `sqlite`，见 P7-8）
 - [ ] 重试与降级：限流类指数退避，登录类不重试
 - [ ] 可观测：Micrometer 打点，替换掉 `ToolCallRecorder`
 - [ ] 测试：录制一次真实响应存 JSON，回放跑工具测试（不依赖网络）
@@ -642,7 +717,7 @@ Get-ChildItem "$HOME\.hoyo\checkin" -Recurse -Filter *.json |
 > 设计细节全部在 [`qq-inbound.md`](qq-inbound.md)，这里只放进度与两条硬规则。
 >
 > **2026-11-18：主线已切到 P11（官方机器人），本节保留为备选记录。** OneBot 桥已删除，
-> 但下面的白名单 / 群聊两条硬规则对两条路都成立。
+> 但下面的准入 / 群聊两条硬规则对两条路都成立。
 
 **可行性结论**：可行。卡点不是 QQ 协议，是「进程级单凭据」——所以第一版只能**自用私聊**。
 
@@ -672,11 +747,11 @@ Get-ChildItem "$HOME\.hoyo\checkin" -Recurse -Filter *.json |
 
 **两条硬规则（写在这里，免得将来手滑）**
 
-1. `QQ_ALLOWLIST` 为空 = 谁都不回。**默认必须是拒绝**，不是「谁都能用」。
-2. 群聊事件现在直接忽略；将来打开也仍只回白名单，但**回复是发在群里的**——白名单挡的是「谁能触发」，挡不住「谁能看见」。
+1. 准入在 QQ 开放平台后台（体验成员 / 可见范围）；应用侧不维护 `QQ_ALLOWLIST`，消息能进到进程就按 `author.user_openid` 识别用户。**默认必须是拒绝**，不是「谁都能用」。
+2. 群聊事件现在直接忽略；将来打开时，平台准入挡的是「谁能触发」，挡不住「谁能看见」——回复发在群里，任何人的签到数据都会展示给全群。
 
 **验收**：QQ 私聊里问「今天签到了吗」，回复与签到总览一致；当天有记录文件时，两者也要对得上；
-再用一个**不在白名单**的号发同一句，必须没有任何回复（fail closed 的证据，不是"大概没收到"）。
+再用一个**不在平台体验成员里**的号发同一句，必须没有任何回复（fail closed 的证据，不是"大概没收到"）。
 
 ---
 
@@ -697,7 +772,7 @@ Get-ChildItem "$HOME\.hoyo\checkin" -Recurse -Filter *.json |
 
 **协议事实（这几条决定实现，别照 OneBot 的经验猜）**
 
-- 事件里**没有 QQ 号，只有 openid** → 白名单和会话 id 都按 openid
+- 事件里**没有 QQ 号，只有 openid** → 会话 id 与 userId 都按 openid；准入在平台侧
 - 被动回复必须带 `msg_id`（来自 `C2C_MESSAGE_CREATE`），**5 分钟内有效**；
   被动窗口 60 分钟、**每条消息最多回 4 次** → 切片上限要从 8 降到 4
 - 接入选 **WebSocket 网关**（官方原话「不依赖公网服务器，适合个人单机使用」），不要 Webhook——
@@ -713,7 +788,7 @@ Get-ChildItem "$HOME\.hoyo\checkin" -Recurse -Filter *.json |
       （包名最终是 `adapter/qq`，不是这里原写的 `adapter/qqofficial`；接第二个平台时若觉得歧义再改，此刻改名最便宜）
 - [x] P11-4b 出站收口第一刀：切片抽成 `channel/TextChunker`（修掉「超长单行被平台拒」和「撞 4 条丢尾」两个 bug）；
       签到结果接上 `Notifier`（默认关，开了才发）
-- [ ] P11-5 真机验收：手机发「签到了吗」5 秒内收到；白名单外的 openid 不回
+- [ ] P11-5 真机验收：手机发「签到了吗」5 秒内收到；平台体验成员外的号不回
 
 **下一步（Step 1，等第二个平台真要接时再做）**：把 `QqBotDispatcher` 里的
 白名单 / 去重 / 会话 id / 同会话串行 / 错误文案提成 `channel.MessagePipeline`，
@@ -776,7 +851,7 @@ Get-ChildItem "$HOME\.hoyo\checkin" -Recurse -Filter *.json |
 **为什么值得做**：签到一天只发生一次、几秒钟就结束。一个只为这几秒钟存在的产品，
 用户不会为它开 QQ——闲聊是留存，不是装饰。
 
-**成本提醒**：SYSTEM 常驻窗口第 1 条，而窗口只有 20 条（P7 的实测证据）。
+**成本提醒**：SYSTEM 常驻窗口第 1 条，窗口硬上限 60 条、正常还会先被摘要压缩（P7-7）。
 人设每多 100 字是**每轮都付**，还挤掉本就不多的对话轮次。**人设要短，few-shot 控制在 2~3 对。**
 
 ---
@@ -792,7 +867,7 @@ Get-ChildItem "$HOME\.hoyo\checkin" -Recurse -Filter *.json |
   签到是单步任务，现在做只会得到一个没人用的规划框架（清单见 `agent-architecture.md` §4）
 - ⏸ **多模型路由与降级** —— 触发条件：需要「贵模型规划 + 便宜模型执行」，或出现明确的降级需求。
   现在只有一个 `ChatModel` bean，抽象一个只有一种实现的 provider 层是负资产
-- ⏸ **长期记忆 / 用户画像** —— 触发条件：用户开始问「我上次说的那个…」而 20 条窗口装不下。
+- ⏸ **长期记忆 / 用户画像** —— 触发条件：用户开始问「我上次说的那个…」而「摘要 + 最近 3 轮」仍装不下。
   先落几个字段的画像文件，不要上向量库
 - ⏸ **持久化 schema 版本 / 数据库** —— 触发条件：第一次出现「旧文件读不了」，或出现跨会话跨年查询
   （「上个月漏签几次」）。前者加 `schemaVersion` + 迁移函数，后者先给 file store 加索引文件
@@ -1170,3 +1245,56 @@ java -jar target\HoyoAgent-0.0.1-SNAPSHOT.jar "--spring.config.import=optional:f
       删除 `scripts/login-qr.ps1` 与 `scripts/smoke-agent.ps1`。
     - 迁移：`~/.hoyo/accounts` 里的旧 `local` 账号要么改 `user_id` 重命名为 `qq:<openid>`，
       要么删除后重新在 QQ 里绑定；签到记录同理。
+- 2026-11-23 调试台新增只读聊天历史（P7-6）：
+    - 新包 `agent/transcript`：`TranscriptStore` 接口 + `FileTranscriptStore`（每会话一个 `.jsonl`，
+      只追加；`seq` 会话内递增用于分页；文件名 sha256 前 32 位，不把 openid 写进文件系统）。
+      另加 `TranscriptExchange/Turn/Session/Page` 四个扁平 record 和 `TranscriptProperties`。
+    - 记录点收在 `AgentChatService#ask`：只有 `userId` 非空的轮次才写（QQ），浏览器 / 一次性会话不写；
+      失败轮也写（`assistant=null` + `error` 摘要），避免"用户问了但历史里没有"。
+    - 新只读接口 `GET /api/transcripts` 和 `GET /api/transcripts/{sessionId}`；**没有 POST/DELETE**。
+      读不 `touch` 会话、不续 TTL；`DELETE /api/memory/{id}` 只清窗口，不删历史。
+    - 历史默认 `<state-dir>/transcripts`、保留 90 天，每天 04:40 清理；`hoyo.transcript.enabled=false` 可整体关。
+      环境变量 `HOYO_TRANSCRIPT_ENABLED/DIR/RETENTION`。
+    - 调试台左栏加「用户聊天记录」：按 userId 分组，组内每个会话单独一条（掩码 userId、轮数、最后时间），
+      点开 `<dialog>` 看全文，「加载更早」按 `seq` 往前翻；页面上没有任何编辑 / 删除入口。
+    - 单测：`FileTranscriptStoreTest` 11 条 + `TranscriptControllerTest` 2 条；全量 198 条通过。
+    - 已知限界：历史从这一版开始积累，之前的轮次已被窗口裁掉，无法回填；调试台无鉴权，
+      README 已提醒只在本机 / 可信内网使用。
+- 2026-11-23 会话摘要压缩（P7-7）：
+     - 新增 `agent/memory/ConversationCompactor`：窗口超过 `trigger-messages`（默认 60 的 2/3 = 40）时，
+       保留最近 `keep-turns`（默认 3）个完整轮次，把更早的轮次渲染成文本交 `ChatModel` 摘要，
+       产出 `【更早对话摘要】` 开头的 `SystemMessage` 放在窗口头部；摘要失败 / 为空 / 没变短都原样退回。
+     - `MemoryProperties` 增加 `compaction` 配置，`max-messages` 默认从 20 提到 60（硬上限）；
+       trigger 强制 `< maxMessages`，避免还没压缩就被 `trim` 掉；`TurnWindowChatMemory` 改为先压后裁。
+     - 配置 `hoyo.memory.compaction.{enabled,trigger-messages,keep-turns,max-summary-chars}`，
+       环境变量 `HOYO_MEMORY_COMPACTION_*`。
+     - 单测：新增 `ConversationCompactorTest` 9 条、`MemoryPropertiesTest` 扩到 5 条、
+       `TurnWindowChatMemoryTest` / `FileMemoryStoreTest` 各 +1；全量 211 条通过。
+     - 坑：给 `MemoryProperties` 这个 record 加第二个构造器后，Spring Boot 放弃构造器绑定、
+       转找无参构造器，启动报 `NoSuchMethodException: MemoryProperties.<init>()`。
+       记录型 `@ConfigurationProperties` 只能保留 canonical 构造器。
+- 2026-11-23 生产化 P0 可靠性护栏：
+    - `/agent` 也走 `channel/SessionSerializer`，同会话并发不再互相覆盖；一次性会话 id 每次新，等价直通。
+    - `SessionMemoryStore` 的 get/update/delete 改为 `ConcurrentHashMap#compute` 原子化；`restore` 只 load
+      不 put，避免在 compute 内二次 put 破坏原子性。
+    - `server.address` 默认 `127.0.0.1`（调试台无鉴权），`compose.yaml` 设 `SERVER_ADDRESS=0.0.0.0`。
+    - 新增 `AgentControllerTest` 2 条（同会话串行 / 一次性会话 evict）；全量 213 条通过。
+- 2026-11-23 生产化 P1 SQLite 存储：
+    - 新增 `common/storage/{SqliteProperties,SqliteDb}`（WAL、busy_timeout、4 表 3 索引）。
+    - 新增 `agent/memory/SqliteMemoryStore` 与 `agent/transcript/SqliteTranscriptStore`，由
+      `hoyo.storage.backend=sqlite` 装配；file 实现加 `matchIfMissing` 条件。
+    - 账号与签到记录去掉 `@ConditionalOnProperty`，固定文件实现——否则 sqlite 下缺
+      `CheckinRecordStore` bean，启动直接失败。
+    - 迁移：记忆按会话懒迁移；聊天历史在 `ApplicationReadyEvent` 一次性导入旧 `.jsonl`，meta 打标，旧文件保留。
+    - 配置 `hoyo.storage.sqlite.{path,busy-timeout}`；`docker compose` 默认 `sqlite`。
+    - 单测新增 `SqliteMemoryStoreTest` 7 条、`SqliteTranscriptStoreTest` 8 条、`SqliteBackendTest` 1 条；
+      全量 229 条通过；18080 冒烟验证旧 JSONL 迁移 + `GET /api/transcripts`。
+- 2026-11-23 Phase A（会话类型与筛选）：
+    - 新增 `common/conversation/ConversationKeys`，从 sessionId 推导 `conversationId` / `kind`
+      （c2c / group / other，仅用于展示与归档，不参与身份判断）；`TranscriptTurn` / `TranscriptSession`
+      增加两字段，file 旧行按 sessionId 回退，SQLite 用 `ensureColumn` 补列并回填。
+    - 移除 `QQ_ALLOWLIST`：`QqBotProperties`、`application.yml`、`.env.example`、dispatcher 检查全部删除，
+      准入改由 QQ 开放平台后台配置。
+    - 调试台「用户聊天记录」增加全部/私聊/群聊筛选与掩码搜索，会话标签显示私聊/群聊，
+      详情头部显示类型 / 掩码用户 / 掩码会话 id；接口仍只有 GET。
+    - 测试 227 条通过。

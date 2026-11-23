@@ -5,7 +5,8 @@ import org.springframework.boot.test.context.SpringBootTest;
 
 @SpringBootTest(properties = {
         "qq.enabled=false",
-        "hoyo.memory.dir=target/test-memory"
+        "hoyo.memory.dir=target/test-memory",
+        "hoyo.transcript.dir=target/test-transcript"
 })
 class HoyoAgentApplicationTests {
 

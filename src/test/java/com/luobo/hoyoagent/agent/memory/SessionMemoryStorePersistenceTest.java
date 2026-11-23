@@ -21,7 +21,7 @@ class SessionMemoryStorePersistenceTest {
 
     private FileMemoryStore persistence;
 
-    private final MemoryProperties properties = new MemoryProperties(20, 200, Duration.ofHours(2));
+    private final MemoryProperties properties = new MemoryProperties(20, 200, Duration.ofHours(2), null);
 
     @BeforeEach
     void setUp() {

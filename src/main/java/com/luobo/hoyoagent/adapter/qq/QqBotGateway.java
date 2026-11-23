@@ -1,6 +1,5 @@
 package com.luobo.hoyoagent.adapter.qq;
 
-import com.luobo.hoyoagent.common.log.Mask;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -66,18 +65,6 @@ public class QqBotGateway {
         if (props.appId().isBlank() || props.clientSecret().isBlank()) {
             log.warn("[QQ] 缺 QQ_APP_ID / QQ_APP_SECRET，跳过启动");
             return;
-        }
-        if (props.allowlist().isEmpty()) {
-            log.warn("[QQ] QQ_ALLOWLIST 为空：所有消息都会被忽略（fail closed）");
-        } else {
-            // 启动时把白名单回显一遍：能立刻区分"没填"和"填错了"，不用等第一条消息
-            log.info("[QQ] 白名单 {} 项：{}", props.allowlist().size(),
-                    props.allowlist().stream().map(Mask::id).toList());
-            props.allowlist().stream().filter(QqBotProperties::looksLikeQqNumber)
-                    .forEach(entry -> log.warn(
-                            "[QQ] 白名单条目 {} 是纯数字，像是 QQ 号：本通道事件里只有 openid，"
-                                    + "填 QQ 号永远不会命中（首次运行后从「不在白名单」那行复制 openid）",
-                            Mask.id(entry)));
         }
         Thread.ofVirtual().name("qq-gateway").start(this::loop);
     }

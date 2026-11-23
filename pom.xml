@@ -55,6 +55,13 @@
             <artifactId>langchain4j-open-ai-spring-boot4-starter</artifactId>
         </dependency>
 
+        <!-- 生产级持久化：单文件 SQLite，不引入连接池/ORM，和 file 后端二选一 -->
+        <dependency>
+            <groupId>org.xerial</groupId>
+            <artifactId>sqlite-jdbc</artifactId>
+            <version>3.49.1.0</version>
+        </dependency>
+
         <!-- 显式声明 OkHttp，供 Mihoyo 工具包直接使用 -->
         <dependency>
             <groupId>com.squareup.okhttp3</groupId>

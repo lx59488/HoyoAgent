@@ -19,7 +19,8 @@ import org.springframework.context.annotation.Configuration;
 public class MemoryConfig {
 
     @Bean
-    public ChatMemoryProvider chatMemoryProvider(SessionMemoryStore store, MemoryProperties properties) {
-        return memoryId -> new TurnWindowChatMemory(memoryId, store, properties.maxMessages());
+    public ChatMemoryProvider chatMemoryProvider(SessionMemoryStore store, MemoryProperties properties,
+                                                 ConversationCompactor compactor) {
+        return memoryId -> new TurnWindowChatMemory(memoryId, store, properties.maxMessages(), compactor);
     }
 }

@@ -28,11 +28,19 @@ public final class TurnWindowChatMemory implements ChatMemory {
     private final Object id;
     private final ChatMemoryStore store;
     private final int maxMessages;
+    private final ConversationCompactor compactor;
 
+    /** 不压缩：只按轮裁剪，单测和"压缩关闭"的降级路径用它。 */
     public TurnWindowChatMemory(Object id, ChatMemoryStore store, int maxMessages) {
+        this(id, store, maxMessages, null);
+    }
+
+    public TurnWindowChatMemory(Object id, ChatMemoryStore store, int maxMessages,
+                                ConversationCompactor compactor) {
         this.id = id;
         this.store = store;
         this.maxMessages = Math.max(2, maxMessages);
+        this.compactor = compactor;
     }
 
     @Override
@@ -44,6 +52,10 @@ public final class TurnWindowChatMemory implements ChatMemory {
     public void add(ChatMessage message) {
         List<ChatMessage> messages = new ArrayList<>(store.getMessages(id));
         messages.add(message);
+        // 必须先压缩再 trim：反过来旧轮已经被丢掉，摘要就没有素材了
+        if (compactor != null) {
+            messages = new ArrayList<>(compactor.compact(id, messages));
+        }
         store.updateMessages(id, trim(messages));
     }
 
@@ -90,7 +102,7 @@ public final class TurnWindowChatMemory implements ChatMemory {
     }
 
     /** 每个 USER 开启一轮；轮首那条不是 USER 的（崩溃残留的 TOOL 之类）自成一轮，最先被丢。 */
-    private static List<List<ChatMessage>> splitTurns(List<ChatMessage> messages) {
+    static List<List<ChatMessage>> splitTurns(List<ChatMessage> messages) {
         List<List<ChatMessage>> turns = new ArrayList<>();
         List<ChatMessage> current = null;
         for (ChatMessage message : messages) {

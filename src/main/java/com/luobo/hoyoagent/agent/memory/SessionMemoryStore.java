@@ -53,51 +53,55 @@ public class SessionMemoryStore implements ChatMemoryStore {
 
     @Override
     public List<ChatMessage> getMessages(Object memoryId) {
-        Slot slot = slots.get(memoryId);
-        if (slot == null) {
-            slot = restore(memoryId);
-            if (slot == null) {
-                return List.of();
+        // 用 compute 把「读盘 → 判过期 → touch」压成一个原子步骤：
+        // 否则并发的 updateMessages 可能在过期判断之后写入，又被这里的 remove 丢掉。
+        Slot slot = slots.compute(memoryId, (key, existing) -> {
+            Slot current = existing != null ? existing : load(key);
+            if (current == null) {
+                return null;
             }
-        }
-        if (idleSince(slot.lastAccess())) {
-            if (slots.remove(memoryId, slot)) {
+            if (idleSince(current.lastAccess())) {
                 log.info("[MEMORY] 会话空闲超时，丢弃 session={} messages={}",
-                        Mask.id(String.valueOf(memoryId)), slot.size());
+                        Mask.id(String.valueOf(key)), current.size());
+                return null;
             }
-            return List.of();
-        }
-        slot.touch();
-        return slot.snapshot();
+            current.touch();
+            return current;
+        });
+        return slot == null ? List.of() : slot.snapshot();
     }
 
     @Override
     public void updateMessages(Object memoryId, List<ChatMessage> messages) {
         if (messages == null || messages.isEmpty()) {
-            slots.remove(memoryId);                 // 和 deleteMessages 保持一致
-            if (persistence != null) {
-                persistence.delete(String.valueOf(memoryId));
-            }
+            deleteMessages(memoryId);
             return;
         }
-        Slot slot = slots.computeIfAbsent(memoryId, key -> new Slot());
-        slot.replace(messages);
+        // 换一个新 Slot 而不是原地改：compute 的映射要么整体生效，要么整体不生效。
+        Slot updated = slots.compute(memoryId, (key, existing) -> {
+            Slot next = new Slot();
+            next.replace(messages);
+            return next;
+        });
         if (persistence != null) {
-            persistence.save(String.valueOf(memoryId), messages, slot.lastAccess());
+            persistence.save(String.valueOf(memoryId), messages, updated.lastAccess());
         }
         evictOverflow();
     }
 
     @Override
     public void deleteMessages(Object memoryId) {
-        slots.remove(memoryId);
+        slots.compute(memoryId, (key, existing) -> null);
         if (persistence != null) {
             persistence.delete(String.valueOf(memoryId));
         }
     }
 
-    /** 新进程第一次见到这个会话：内存 miss 才读盘。 */
-    private Slot restore(Object memoryId) {
+    /**
+     * 新进程第一次见到这个会话：内存 miss 才读盘。返回的 Slot 由调用方放进 map，
+     * 这里不 put——在 compute 的映射函数里再 put 同一个 key 会破坏原子性。
+     */
+    private Slot load(Object memoryId) {
         if (persistence == null) {
             return null;
         }
@@ -111,7 +115,6 @@ public class SessionMemoryStore implements ChatMemoryStore {
             log.info("[MEMORY] 磁盘上的会话已空闲超时，当作新会话 session={}", Mask.id(String.valueOf(memoryId)));
             return null;
         }
-        slots.put(memoryId, slot);
         log.info("[MEMORY] 从磁盘恢复会话 session={} messages={}", Mask.id(String.valueOf(memoryId)), slot.size());
         return slot;
     }

@@ -85,14 +85,7 @@ public class QqBotDispatcher {
             log.info("[QQ] 忽略：字段不全，d={}", abbreviate(d.toString()));
             return;
         }
-        if (!props.allowlist().contains(openid)) {
-            // 第一次跑一定会走到这里，而这一行是"该往 QQ_ALLOWLIST 里填什么"的唯一来源，
-            // 所以**故意不掩码**：掩掉之后人就没法照着抄，机器人永远配不通。
-            // openid 不是凭据（没有 AppSecret 拿它发不出消息），泄露风险远小于"配不通"。
-            log.info("[QQ] 不在白名单：openid={}（把整串值填进 QQ_ALLOWLIST{}）",
-                    openid, props.allowlist().isEmpty() ? "；当前白名单为空" : "");
-            return;
-        }
+        // 访问控制在 QQ 开放平台侧（机器人可见范围/沙箱成员）配置；代码不再维护本地白名单。
         if (!markSeen(msgId)) {
             log.info("[QQ] 忽略：重复事件 msgId={}", Mask.id(msgId));
             return;
@@ -108,9 +101,9 @@ public class QqBotDispatcher {
             handleBinding(openid, userId, intent, msgId);
             return;
         }
-            String reply;
+        String reply;
         try {
-            reply = serializer.call(sessionId, () -> chat.ask(sessionId, text).reply());
+            reply = serializer.call(sessionId, () -> chat.ask(sessionId, userId, text).reply());
         } catch (Exception e) {
             log.warn("[QQ] Agent 调用失败：{}", e.toString());
             reply = "【出错了】" + describe(e);

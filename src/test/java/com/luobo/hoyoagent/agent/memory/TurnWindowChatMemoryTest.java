@@ -6,6 +6,8 @@ import dev.langchain4j.data.message.ChatMessage;
 import dev.langchain4j.data.message.SystemMessage;
 import dev.langchain4j.data.message.ToolExecutionResultMessage;
 import dev.langchain4j.data.message.UserMessage;
+import dev.langchain4j.model.chat.ChatModel;
+import dev.langchain4j.model.chat.response.ChatResponse;
 import org.junit.jupiter.api.Test;
 
 import java.time.Duration;
@@ -17,7 +19,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 class TurnWindowChatMemoryTest {
 
     private final SessionMemoryStore store =
-            new SessionMemoryStore(new MemoryProperties(20, 200, Duration.ofHours(2)));
+            new SessionMemoryStore(new MemoryProperties(20, 200, Duration.ofHours(2), null));
 
     private List<ChatMessage> messages(List<ChatMessage> history, int max) {
         List<ChatMessage> copy = new ArrayList<>(history);
@@ -76,5 +78,30 @@ class TurnWindowChatMemoryTest {
         assertThat(kept).hasSize(3);                     // 1 system + 最后一轮 2 条
         assertThat(kept).noneMatch(m -> m instanceof ToolExecutionResultMessage);
         assertThat(kept.get(1)).isInstanceOf(UserMessage.class);
+    }
+
+    @Test
+    void 超窗时先压缩再裁剪_摘要留在窗口头部() {
+        MemoryProperties properties = new MemoryProperties(30, 200, Duration.ofHours(2),
+                new MemoryProperties.Compaction(true, 6, 2, 200));
+        SessionMemoryStore compactingStore = new SessionMemoryStore(properties);
+        ChatModel model = new ChatModel() {
+            @Override
+            public ChatResponse chat(List<ChatMessage> messages) {
+                return ChatResponse.builder().aiMessage(AiMessage.from("压缩后的摘要")).build();
+            }
+        };
+        TurnWindowChatMemory memory = new TurnWindowChatMemory("t", compactingStore,
+                properties.maxMessages(), new ConversationCompactor(model, properties));
+
+        for (int i = 0; i < 5; i++) {
+            memory.add(UserMessage.from("问题 " + i));
+            memory.add(AiMessage.from("回答 " + i));
+        }
+
+        List<ChatMessage> stored = compactingStore.getMessages("t");
+        assertThat(stored).hasSizeLessThan(10);
+        assertThat(stored.get(0)).isInstanceOf(SystemMessage.class);
+        assertThat(((SystemMessage) stored.get(0)).text()).contains("压缩后的摘要");
     }
 }

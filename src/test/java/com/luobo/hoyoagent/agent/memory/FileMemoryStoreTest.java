@@ -1,6 +1,7 @@
 package com.luobo.hoyoagent.agent.memory;
 
 import dev.langchain4j.data.message.ChatMessage;
+import dev.langchain4j.data.message.SystemMessage;
 import dev.langchain4j.data.message.UserMessage;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -34,6 +35,22 @@ class FileMemoryStoreTest {
         p.save("qqbot:c2c:x", messages, Instant.now());
 
         assertThat(p.load("qqbot:c2c:x").orElseThrow().messages()).isEqualTo(messages);
+    }
+
+    @Test
+    void systemSummarySurvivesRoundTrip() {
+        FileMemoryStore p = persistence();
+        List<ChatMessage> messages = List.of(
+                SystemMessage.from("【更早对话摘要】用户喜欢原神，上周问过深渊"),
+                UserMessage.from("继续"));
+
+        p.save("s1", messages, Instant.now());
+
+        List<ChatMessage> loaded = p.load("s1").orElseThrow().messages();
+        assertThat(loaded).hasSize(2);
+        assertThat(loaded.get(0)).isInstanceOf(SystemMessage.class);
+        assertThat(((SystemMessage) loaded.get(0)).text())
+                .isEqualTo("【更早对话摘要】用户喜欢原神，上周问过深渊");
     }
 
     @Test

@@ -154,6 +154,279 @@ function renderMemory(view) {
 }
 
 /* ------------------------------------------------------------------ */
+/* 用户聊天记录（只读）                                                */
+/* ------------------------------------------------------------------ */
+
+const tx = {
+    sessions: [],
+    current: null,
+    loading: false,
+    filter: "all",
+    query: ""
+};
+
+function maskId(value) {
+    if (!value) {
+        return "—";
+    }
+    return value.length <= 8 ? "***" : `${value.slice(0, 4)}***${value.slice(-4)}`;
+}
+
+function formatTime(value) {
+    if (!value) {
+        return "—";
+    }
+    const date = new Date(value);
+    return Number.isNaN(date.getTime())
+        ? value
+        : date.toLocaleString("zh-CN", { hour12: false });
+}
+
+async function loadTranscripts() {
+    $("#tx-meta").textContent = "读取中…";
+    try {
+        const result = await request("/api/transcripts");
+        tx.sessions = result.data || [];
+        renderTranscriptList();
+    } catch (error) {
+        $("#tx-meta").textContent = "读取失败：" + error.message;
+        $("#tx-list").replaceChildren();
+    }
+}
+
+function renderTranscriptList() {
+    const list = $("#tx-list");
+    list.replaceChildren();
+
+    const all = tx.sessions || [];
+    const sessions = all.filter(matchesFilter);
+    const users = groupByUser(sessions);
+    $("#tx-meta").textContent = all.length
+        ? `${users.length} 个用户 · ${sessions.length} 个会话`
+            + (sessions.length === all.length ? "" : `（共 ${all.length} 个）`)
+            + " · 只读，按最后聊天时间倒序"
+        : "还没有记录：历史从这一版开始积累，QQ 里产生新聊天后才会出现。";
+
+    if (!users.length) {
+        const empty = document.createElement("li");
+        empty.className = "tx-empty";
+        empty.textContent = all.length ? "没有符合筛选的会话" : "暂无记录";
+        list.append(empty);
+        return;
+    }
+
+    users.forEach((user) => list.append(renderUserGroup(user)));
+}
+
+/** 类型筛选 + 掩码/原文搜索；只作用于已经取回的列表，不再发请求。 */
+function matchesFilter(session) {
+    if (tx.filter !== "all" && (session.kind || "other") !== tx.filter) {
+        return false;
+    }
+    const query = tx.query.trim().toLowerCase();
+    if (!query) {
+        return true;
+    }
+    return [session.userId, session.sessionId, session.conversationId]
+        .filter(Boolean)
+        .flatMap((value) => [value.toLowerCase(), maskId(value).toLowerCase()])
+        .some((value) => value.includes(query));
+}
+
+/** 同一个 userId 的会话归到一组；sessions 已按最后时间倒序，所以组也按最近活动倒序。 */
+function groupByUser(sessions) {
+    const users = new Map();
+    sessions.forEach((session) => {
+        const key = session.userId || "未知用户";
+        if (!users.has(key)) {
+            users.set(key, { userId: key, sessions: [] });
+        }
+        users.get(key).sessions.push(session);
+    });
+    return [...users.values()];
+}
+
+function renderUserGroup(user) {
+    const item = document.createElement("li");
+    item.className = "tx-user-group";
+
+    const head = document.createElement("div");
+    head.className = "tx-user-head";
+    const id = document.createElement("span");
+    id.className = "tx-user-id";
+    id.textContent = maskId(user.userId);
+    const count = document.createElement("span");
+    count.className = "tx-user-count";
+    count.textContent = `${user.sessions.length} 个会话`;
+    head.append(id, count);
+
+    const sessions = document.createElement("ul");
+    sessions.className = "tx-sessions";
+    user.sessions.forEach((session) => {
+        const row = document.createElement("li");
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = "tx-item";
+
+        const top = document.createElement("span");
+        top.className = "tx-item-top";
+        const label = document.createElement("span");
+        label.className = "tx-session-label";
+        label.textContent = sessionLabel(session);
+        const meta = document.createElement("span");
+        meta.className = "tx-item-meta";
+        meta.textContent = `${session.turns} 轮 · ${formatTime(session.lastAt)}`;
+        top.append(label, meta);
+
+        const preview = document.createElement("span");
+        preview.className = "tx-item-preview";
+        preview.textContent = session.preview || "（没有文本）";
+
+        button.append(top, preview);
+        button.addEventListener("click", () => openTranscript(session));
+        row.append(button);
+        sessions.append(row);
+    });
+
+    item.append(head, sessions);
+    return item;
+}
+
+/** 只用于展示，不参与身份判断：会话类型由 transcript 记录里的 kind 决定。 */
+function sessionLabel(session) {
+    const kind = (session && session.kind) || "other";
+    if (kind === "c2c") {
+        return "私聊";
+    }
+    if (kind === "group") {
+        const conversationId = (session && session.conversationId) || "";
+        const groupId = conversationId.startsWith("group:")
+            ? conversationId.slice("group:".length)
+            : conversationId;
+        return `群聊 ${maskId(groupId)}`;
+    }
+    return "会话";
+}
+
+async function openTranscript(session) {
+    tx.current = {
+        sessionId: session.sessionId,
+        userId: session.userId,
+        turns: [],
+        hasMore: false
+    };
+    tx.loading = false;
+    $("#tx-title").textContent = maskId(session.userId);
+    $("#tx-sub").textContent = `${sessionLabel(session)} · 用户 ${maskId(session.userId)}`
+        + ` · ${session.turns} 轮 · ${formatTime(session.lastAt)}`;
+    $("#tx-body").replaceChildren();
+    $("#tx-foot-note").textContent = "";
+    $("#btn-tx-older").disabled = true;
+
+    const dialog = $("#tx-dialog");
+    if (typeof dialog.showModal === "function") {
+        dialog.showModal();
+    } else {
+        dialog.setAttribute("open", "");
+    }
+    await loadTranscriptPage(0);
+}
+
+async function loadTranscriptPage(before) {
+    if (!tx.current || tx.loading) {
+        return;
+    }
+    tx.loading = true;
+    $("#btn-tx-older").disabled = true;
+
+    try {
+        const suffix = before > 0 ? `?before=${before}&limit=100` : "?limit=100";
+        const result = await request(`/api/transcripts/${encodeURIComponent(tx.current.sessionId)}${suffix}`);
+        const page = result.data || {};
+        const turns = page.turns || [];
+        const body = $("#tx-body");
+        const previousHeight = body.scrollHeight;
+        const previousTop = body.scrollTop;
+        const fragment = document.createDocumentFragment();
+        turns.forEach((turn) => fragment.append(renderTurn(turn)));
+
+        if (before > 0) {
+            body.prepend(fragment);
+            body.scrollTop = previousTop + (body.scrollHeight - previousHeight);
+            tx.current.turns = [...turns, ...tx.current.turns];
+        } else {
+            body.append(fragment);
+            body.scrollTop = body.scrollHeight;
+            tx.current.turns = turns;
+        }
+
+        tx.current.hasMore = Boolean(page.hasMore);
+        $("#btn-tx-older").disabled = !tx.current.hasMore;
+        $("#tx-foot-note").textContent = tx.current.turns.length
+            ? (tx.current.hasMore
+                ? `已显示 ${tx.current.turns.length} 轮，可继续往前翻`
+                : `已到最早（共 ${tx.current.turns.length} 轮）`)
+            : "这个会话还没有可显示的轮次。";
+    } catch (error) {
+        $("#tx-foot-note").textContent = "读取失败：" + error.message;
+    } finally {
+        tx.loading = false;
+        if (tx.current && tx.current.hasMore) {
+            $("#btn-tx-older").disabled = false;
+        }
+    }
+}
+
+function renderTurn(turn) {
+    const wrap = document.createElement("div");
+    wrap.className = "tx-turn";
+
+    const time = document.createElement("div");
+    time.className = "tx-time";
+    time.textContent = `#${turn.seq} · ${formatTime(turn.at)}`;
+    wrap.append(time);
+
+    wrap.append(turnLine("用户", turn.user, "tx-user"));
+    const reply = turn.assistant !== null && turn.assistant !== undefined
+        ? turn.assistant
+        : (turn.error ? "（调用失败，没有回复）" : "（空回复）");
+    wrap.append(turnLine("模型", reply, "tx-ai"));
+
+    if (Array.isArray(turn.tools) && turn.tools.length) {
+        const chips = document.createElement("div");
+        chips.className = "chips";
+        turn.tools.forEach((tool) => {
+            const chip = document.createElement("span");
+            chip.className = "chip";
+            chip.textContent = tool;
+            chips.append(chip);
+        });
+        wrap.append(chips);
+    }
+
+    if (turn.error) {
+        const error = document.createElement("div");
+        error.className = "tx-error";
+        error.textContent = "错误：" + turn.error;
+        wrap.append(error);
+    }
+    return wrap;
+}
+
+function turnLine(who, text, kind) {
+    const line = document.createElement("div");
+    line.className = `tx-msg ${kind}`;
+    const label = document.createElement("span");
+    label.className = "tx-who";
+    label.textContent = who;
+    const body = document.createElement("div");
+    body.className = "tx-text";
+    body.textContent = text || "";
+    line.append(label, body);
+    return line;
+}
+
+/* ------------------------------------------------------------------ */
 /* 对话                                                                */
 /* ------------------------------------------------------------------ */
 
@@ -279,8 +552,36 @@ function newSession() {
 /* ------------------------------------------------------------------ */
 
 $("#btn-memory").addEventListener("click", loadMemory);
+$("#btn-transcripts").addEventListener("click", loadTranscripts);
+
+$("#tx-filter").addEventListener("click", (event) => {
+    const button = event.target.closest("button[data-kind]");
+    if (!button) {
+        return;
+    }
+    tx.filter = button.dataset.kind;
+    document.querySelectorAll("#tx-filter .tx-seg").forEach((item) => {
+        item.classList.toggle("is-active", item === button);
+    });
+    renderTranscriptList();
+});
+$("#tx-search").addEventListener("input", (event) => {
+    tx.query = event.target.value;
+    renderTranscriptList();
+});
 $("#btn-new-session").addEventListener("click", newSession);
 $("#btn-clear").addEventListener("click", clearSession);
+
+$("#btn-tx-close").addEventListener("click", () => $("#tx-dialog").close());
+$("#btn-tx-older").addEventListener("click", () => {
+    const first = tx.current && tx.current.turns[0];
+    if (first) {
+        loadTranscriptPage(first.seq);
+    }
+});
+$("#tx-dialog").addEventListener("close", () => {
+    tx.current = null;
+});
 
 document.querySelectorAll(".seg").forEach((button) => {
     button.addEventListener("click", () => {
@@ -312,3 +613,4 @@ $("#input").addEventListener("keydown", (event) => {
 
 addMessage("note", "网页只用于聊天调试和查看记忆；绑定、签到都在 QQ 里完成。当前会话没有平台身份，Agent 的签到类工具会提示「没有绑定」。");
 loadMemory();
+loadTranscripts();

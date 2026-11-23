@@ -172,6 +172,6 @@ class SessionMemoryStoreTest {
     }
 
     private static SessionMemoryStore store(int maxSessions, Duration idleTtl) {
-        return new SessionMemoryStore(new MemoryProperties(20, maxSessions, idleTtl));
+        return new SessionMemoryStore(new MemoryProperties(20, maxSessions, idleTtl, null));
     }
 }

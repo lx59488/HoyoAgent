@@ -1,6 +1,7 @@
 package com.luobo.hoyoagent.adapter.http;
 
 import com.luobo.hoyoagent.agent.AgentChatService;
+import com.luobo.hoyoagent.channel.SessionSerializer;
 import com.luobo.hoyoagent.common.exception.ErrorCode;
 import com.luobo.hoyoagent.common.result.ApiResult;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -19,8 +20,11 @@ public class AgentController {
 
     private final AgentChatService chat;
 
-    public AgentController(AgentChatService chat) {
+    private final SessionSerializer serializer;
+
+    public AgentController(AgentChatService chat, SessionSerializer serializer) {
         this.chat = chat;
+        this.serializer = serializer;
     }
 
     /**
@@ -41,7 +45,10 @@ public class AgentController {
         boolean oneShot = sessionId == null || sessionId.isBlank();
         String id = oneShot ? ONE_SHOT_PREFIX + UUID.randomUUID() : sessionId.trim();
         try {
-            AgentChatService.Answer answer = chat.ask(id, q);
+            // 同一会话必须串行：ask 内部是 getMessages → add → updateMessages，
+            // 两个并发请求会各自读到同一份窗口、互相覆盖。QQ 侧早已用同一个 serializer。
+            // 一次性会话的 id 每次都是新的，走这里等价于直通。
+            AgentChatService.Answer answer = serializer.call(id, () -> chat.ask(id, null, q));
             return ApiResult.success(new AgentAnswer(answer.reply(), answer.toolsCalled(), id, answer.messages()));
         } catch (Exception e) {
             return ApiResult.error(ErrorCode.INTERNAL_ERROR,
