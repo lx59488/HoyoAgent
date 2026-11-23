@@ -27,8 +27,7 @@ public class CheckinOverviewTool {
     private final AccountService accounts;
 
     /** 没有平台身份时的统一回复。 */
-    static final String NO_IDENTITY =
-            "没有绑定米游社账号，无法签到。请绑定后重试";
+    static final String NO_IDENTITY = "没有绑定米游社账号，查不到签到总览。请绑定后重试";
 
     public CheckinOverviewTool(ToolCallRecorder recorder,
                                CheckinOverviewService service,
