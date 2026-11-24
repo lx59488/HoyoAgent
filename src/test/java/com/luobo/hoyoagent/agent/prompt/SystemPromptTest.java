@@ -44,8 +44,8 @@ class SystemPromptTest {
 
         assertThat(prompt).contains("<capabilities>");
         // 空标签比没有标签更糟：模型会以为"这里本来该有内容"
-        assertThat(prompt).doesNotContain("<persona>", "<channel>", "<context>");
-        assertThat(prompt).doesNotContain("<persona></persona>");
+        assertThat(prompt).contains("<capabilities>", "<channel>");
+        assertThat(prompt).doesNotContain("<persona>", "<context>");
     }
 
     @Test

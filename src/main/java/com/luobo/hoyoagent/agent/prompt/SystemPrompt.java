@@ -21,7 +21,7 @@ public class SystemPrompt {
     /**
      * prompt 版本。改任何一段的文字都要 +1，否则事后回放日志时无法归因（C4 的 {@code promptVersion}）。
      */
-    public static final String VERSION = "p2";
+    public static final String VERSION = "p3";
 
     /**
      * 1. 人设 / 语气。
@@ -50,10 +50,16 @@ public class SystemPrompt {
 
     /**
      * 3. 通道文体。QQ 是纯文本：单条 ≤600 字、同一 msg_id 最多 4 条、markdown 不会渲染。
-     *
-     * <p>现在留空：写它属于改提示词文字（C1-b），必须先有 C4 的基线才能判断"改了是变好还是变坏"。
      */
-    public static final String CHANNEL = "";
+    public static final String CHANNEL = """
+        当前通道是 QQ 私聊，消息按纯文本展示，不会渲染 Markdown。
+        回复要求：
+        1. 先给结论，再补必要依据；不写开场白，不重复总结。
+        2. 用简短段落；需要列举时用「- 」开头，一项一行。
+        3. 不使用 Markdown 标题、加粗、斜体、引用、表格、代码围栏和链接语法；链接直接写完整地址。
+        4. 表格内容改成逐行文字，字段名后接「：」。
+        5. 单次回复尽量控制在 600 字以内；超长时优先压缩措辞，保留结论和关键事实，不要依赖自动分段。
+        """;
 
     /** 总长上限：4000 字。超了就抛，而不是悄悄截断——截断会让某一段永远看不到。 */
     static final int MAX_CHARS = 4000;
