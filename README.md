@@ -79,6 +79,7 @@ Docker：`docker compose up -d --build`。唯一需要持久化的是卷里的 `
 | [mihoyo-auth.md](docs/mihoyo-auth.md) | 米游社账号：扫码、token 四层、多用户凭据 | 项目整体定位 |
 | [qq-inbound.md](docs/qq-inbound.md) | QQ 接入：官方机器人 WS、平台侧准入、被动回复限制 | 业务能力 |
 | [tool-ideas.md](docs/tool-ideas.md) | 工具选型：还能加哪些「账号数据」工具、哪些不做 | 知识库 / 闲聊 |
+| [knowledge-design.md](docs/knowledge-design.md) | 知识库：语料契约、构建/检索管线、存储选型与评测 | 何时开工（见 ROADMAP P12） |
 
 > 子系统文档只承诺它自己那一块。想知道「这个项目要长成什么样」，看本页和
 > [ROADMAP 顶部的能力地图](docs/ROADMAP.md)。
